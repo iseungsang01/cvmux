@@ -224,6 +224,79 @@ kbd {
   font-size: 11px;
 }
 
+/* git 브랜치 + 리슨 포트 줄 */
+.session-facts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.fact-git {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+.fact-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+  font-size: 11px;
+}
+
+.fact-branch {
+  overflow: hidden;
+  max-width: 104px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fact-git.is-dirty {
+  color: #d9a84e;
+}
+
+.fact-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.fact-op {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #3a2a18;
+  color: #ffc777;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.fact-ab {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fact-port {
+  padding: 1px 5px;
+  border: 1px solid #24344f;
+  border-radius: 3px;
+  background: #15203a;
+  color: var(--accent);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
 .session-exit {
   margin-top: 4px;
   color: var(--text-dim);

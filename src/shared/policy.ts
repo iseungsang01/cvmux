@@ -49,5 +49,33 @@ export const POLICY = {
   PREVIEW_MAX_CHARS: 80,
 
   /** ConPTY 최소 요구 Windows 빌드 (10 1809). P2-6 */
-  MIN_WINDOWS_BUILD: 17763
+  MIN_WINDOWS_BUILD: 17763,
+
+  /** git 조사 타임아웃(ms). 거대 저장소에서 무한정 기다리지 않는다. P13-5 */
+  GIT_TIMEOUT_MS: 3000,
+
+  /**
+   * 주변 정보(git/포트) 폴링 주기. busy 세션이 있으면 짧게, 전부 유휴면 길게. P14-11
+   * 실측 근거: netstat 65ms, WMI 프로세스 열거 292ms, Get-NetTCPConnection 1288ms.
+   */
+  PROBE_INTERVAL_BUSY_MS: 4000,
+  PROBE_INTERVAL_IDLE_MS: 15_000,
+
+  /** 프로세스 트리 캐시 최대 수명. PID 재사용에 대비해 이 주기마다 강제 갱신. P14-11 */
+  PROCESS_TREE_MAX_AGE_MS: 60_000,
+
+  /** 포트 조사가 이만큼 연속 실패하면 기능을 끈다. P14-4 */
+  PORT_PROBE_MAX_FAILURES: 5,
+
+  /** 사이드바에 표시할 최대 포트 개수. 나머지는 +N. P14-1 */
+  MAX_PORTS_SHOWN: 3,
+
+  /** 같은 세션의 연속 알림을 합치는 시간(ms). P15-4 */
+  NOTIFY_COALESCE_MS: 5000,
+
+  /** 세션 목록을 디스크에 저장하는 주기(ms). P16-1 */
+  PERSIST_INTERVAL_MS: 30_000,
+
+  /** 세션당 저장할 스크롤백 상한. P16-5 */
+  PERSIST_SCROLLBACK_BYTES: 128 * 1024
 } as const

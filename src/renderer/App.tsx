@@ -131,12 +131,18 @@ export function App(): JSX.Element {
     // 종료 자체는 meta 이벤트로도 전달된다. 여기서는 별도 처리가 없다. P1-1
     const offExit = window.cvmux.onExit(() => {})
 
+    // 토스트를 클릭했다 — 해당 세션으로 전환한다. P15-5
+    const offActivate = window.cvmux.onActivate((id) => {
+      if (sessionsRef.current.some((s) => s.id === id)) setActiveId(id)
+    })
+
     return () => {
       offData()
       offMeta()
       offCreated()
       offClosed()
       offExit()
+      offActivate()
     }
   }, [host])
 
@@ -151,6 +157,8 @@ export function App(): JSX.Element {
   }, [sessions, activeId])
 
   useEffect(() => {
+    // 보고 있는 세션을 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2
+    void window.cvmux.setActive(activeId)
     if (activeId === null) return
     // 세션을 열어 봤으므로 미읽음을 해제한다. P4-5
     void window.cvmux.markRead(activeId)

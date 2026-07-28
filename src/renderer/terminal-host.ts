@@ -179,7 +179,8 @@ export class TerminalHost {
       scrollback: POLICY.SCROLLBACK_LINES, // P3-6 / P8-1
       cursorBlink: true,
       cursorStyle: 'bar',
-      drawBoldTextInBrightColors: false,
+      // drawBoldTextInBrightColors는 기본값(true)을 쓴다. 끄면 chalk/ink 기반 CLI가
+      // 볼드+색으로 표현하는 강조가 어두운 원색으로 렌더링돼 화면이 칙칙해진다.
       allowProposedApi: true,
       macOptionIsMeta: false,
       theme: THEME

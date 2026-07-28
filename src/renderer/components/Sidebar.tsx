@@ -1,7 +1,14 @@
 import type { JSX } from 'react'
 
 import type { SessionMeta } from '@shared/types'
-import { exitLabel, isFailedExit, shortenPath, statusLabel } from '../lib/format'
+import {
+  exitLabel,
+  gitTooltip,
+  isFailedExit,
+  shortenPath,
+  splitPorts,
+  statusLabel
+} from '../lib/format'
 
 /**
  * 왼쪽 사이드바 — 이 앱의 존재 이유 (P4 시각 표현).
@@ -132,6 +139,8 @@ function SessionRow({
 
           <div className="session-cwd">{shortenPath(session.cwd)}</div>
 
+          <SessionFacts session={session} />
+
           {session.status === 'exited' ? (
             <div className={`session-exit${isFailedExit(session) ? ' is-failed' : ''}`}>
               {exitLabel(session)} · Enter로 재시작
@@ -158,6 +167,45 @@ function SessionRow({
         </button>
       </div>
     </li>
+  )
+}
+
+/** git 브랜치와 리슨 포트 — cmux 사이드바의 그 줄. P13 / P14 */
+function SessionFacts({ session }: { session: SessionMeta }): JSX.Element | null {
+  const { git, ports } = session
+  if (!git && ports.length === 0) return null
+
+  const { shown, extra } = splitPorts(ports)
+
+  return (
+    <div className="session-facts">
+      {git && (
+        <span
+          className={`fact fact-git${git.dirty ? ' is-dirty' : ''}`}
+          title={gitTooltip(git)}
+        >
+          {/* 브랜치는 ⎇, detached HEAD는 커밋을 가리키므로 ◉ */}
+          <span className="fact-icon">{git.detached ? '◉' : '⎇'}</span>
+          {/* 브랜치명이 길면 말줄임, 전체는 툴팁. P13-9 */}
+          <span className="fact-branch">{git.branch}</span>
+          {git.operation !== null && <span className="fact-op">{git.operation}</span>}
+          {git.dirty && <span className="fact-dot" aria-label="변경사항 있음" />}
+          {git.ahead > 0 && <span className="fact-ab">↑{git.ahead}</span>}
+          {git.behind > 0 && <span className="fact-ab">↓{git.behind}</span>}
+        </span>
+      )}
+
+      {shown.map((port) => (
+        <span key={port} className="fact fact-port">
+          :{port}
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className="fact fact-port" title={ports.join(', ')}>
+          +{extra}
+        </span>
+      )}
+    </div>
   )
 }
 

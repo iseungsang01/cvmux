@@ -42,12 +42,14 @@ const api: CvmuxApi = {
   setTitle: (id, title) => ipcRenderer.invoke(IPC.SET_TITLE, id, title) as Promise<boolean>,
   markRead: (id) => ipcRenderer.invoke(IPC.MARK_READ, id) as Promise<boolean>,
   confirmPaste: (bytes) => ipcRenderer.invoke(IPC.CONFIRM_PASTE, bytes) as Promise<boolean>,
+  setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
 
   onData: (cb) => subscribe<[string, string]>(IPC.EVT_DATA, cb),
   onMeta: (cb) => subscribe<[SessionMeta]>(IPC.EVT_META, cb),
   onExit: (cb) => subscribe<[SessionExitInfo]>(IPC.EVT_EXIT, cb),
   onClosed: (cb) => subscribe<[string]>(IPC.EVT_CLOSED, cb),
-  onCreated: (cb) => subscribe<[SessionMeta]>(IPC.EVT_CREATED, cb)
+  onCreated: (cb) => subscribe<[SessionMeta]>(IPC.EVT_CREATED, cb),
+  onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

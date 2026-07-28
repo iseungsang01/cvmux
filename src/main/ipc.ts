@@ -2,6 +2,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 
 import { POLICY } from '@shared/policy'
 import { IPC, type CreateSessionOptions } from '@shared/types'
+import type { Notifier } from './notifier'
 import type { PtyManager } from './pty-manager'
 
 /**
@@ -10,7 +11,10 @@ import type { PtyManager } from './pty-manager'
  * 모든 핸들러는 예외를 던지지 않는다. 알 수 없는 세션 id, 죽은 PTY, 잘못된
  * 인자는 모두 `false`/`null`로 응답한다 — 렌더러를 죽이는 것보다 낫다(P1-9).
  */
-export function registerIpc(manager: PtyManager): void {
+export function registerIpc(manager: PtyManager, notifier: Notifier): void {
+  /** 사용자가 지금 보고 있는 세션. 토스트를 띄울지 판단에 쓴다. P15-2 */
+  let activeSessionId: string | null = null
+
   const broadcast = (channel: string, ...args: unknown[]): void => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed() || win.webContents.isDestroyed()) continue
@@ -21,8 +25,31 @@ export function registerIpc(manager: PtyManager): void {
   manager.on('data', (id, chunk) => broadcast(IPC.EVT_DATA, id, chunk))
   manager.on('meta', (meta) => broadcast(IPC.EVT_META, meta))
   manager.on('exit', (info) => broadcast(IPC.EVT_EXIT, info))
-  manager.on('closed', (id) => broadcast(IPC.EVT_CLOSED, id))
   manager.on('created', (meta) => broadcast(IPC.EVT_CREATED, meta))
+
+  manager.on('closed', (id) => {
+    notifier.forget(id)
+    broadcast(IPC.EVT_CLOSED, id)
+  })
+
+  // 명시적 알림(OSC 9/777/99/BEL)을 받으면 데스크톱 토스트도 띄운다. P15-1
+  manager.on('notify', (id, text) => {
+    const meta = manager.metaOf(id)
+    if (!meta) return
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    notifier.notify({
+      sessionId: id,
+      sessionTitle: meta.title,
+      text,
+      isActiveSession: id === activeSessionId,
+      windowFocused: win?.isFocused() ?? false
+    })
+  })
+
+  ipcMain.handle(IPC.SET_ACTIVE, (_event, id: unknown) => {
+    activeSessionId = typeof id === 'string' ? id : null
+    return true
+  })
 
   ipcMain.handle(IPC.LIST, () => manager.list())
 

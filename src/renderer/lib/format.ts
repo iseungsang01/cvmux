@@ -1,4 +1,5 @@
-import type { SessionMeta } from '@shared/types'
+import { POLICY } from '@shared/policy'
+import type { GitInfo, SessionMeta } from '@shared/types'
 
 /**
  * 사이드바에 넣을 만큼 경로를 줄인다 (P11-3).
@@ -25,6 +26,22 @@ export function exitLabel(session: SessionMeta): string | null {
 export function isFailedExit(session: SessionMeta): boolean {
   if (session.status !== 'exited') return false
   return session.exitSignal !== null || (session.exitCode !== null && session.exitCode !== 0)
+}
+
+/** 브랜치 옆 툴팁 문구. P13-9 (표시는 말줄임, 전체는 여기로) */
+export function gitTooltip(git: GitInfo): string {
+  const parts = [git.detached ? `detached at ${git.branch}` : `브랜치 ${git.branch}`]
+  if (git.operation) parts.push(`${git.operation} 진행 중`)
+  if (git.dirty) parts.push('변경사항 있음')
+  if (git.ahead > 0) parts.push(`${git.ahead} 커밋 앞섬`)
+  if (git.behind > 0) parts.push(`${git.behind} 커밋 뒤처짐`)
+  return parts.join(' · ')
+}
+
+/** 포트는 오름차순 최대 3개, 나머지는 +N. P14-1 */
+export function splitPorts(ports: number[]): { shown: number[]; extra: number } {
+  const shown = ports.slice(0, POLICY.MAX_PORTS_SHOWN)
+  return { shown, extra: ports.length - shown.length }
 }
 
 export function statusLabel(session: SessionMeta): string {

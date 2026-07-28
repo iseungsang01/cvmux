@@ -1,12 +1,31 @@
-import { release } from 'node:os'
+import { homedir, release } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 
 import { POLICY } from '@shared/policy'
+import { IPC } from '@shared/types'
 import { registerIpc } from './ipc'
+import { Notifier } from './notifier'
 import { PtyManager } from './pty-manager'
 
-const manager = new PtyManager()
+/**
+ * 개발 중에는 앱을 띄운 디렉토리에서 첫 세션을 시작한다 — 터미널 앱의 관례이고,
+ * git 정보도 바로 보인다. 패키징된 앱의 cwd는 설치 경로라 의미가 없으므로 홈을 쓴다.
+ */
+const manager = new PtyManager({
+  defaultCwd: app.isPackaged ? homedir() : process.cwd()
+})
+
+/** 토스트를 클릭하면 창을 깨우고 그 세션으로 전환한다. P15-5 */
+const notifier = new Notifier((sessionId) => {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  win.webContents.send(IPC.EVT_ACTIVATE, sessionId)
+})
+
 let mainWindow: BrowserWindow | null = null
 /** 종료 확인을 통과했는가 — close 핸들러의 재진입을 막는다. P10-1 */
 let allowClose = false
@@ -126,7 +145,10 @@ if (!app.requestSingleInstanceLock()) {
       return
     }
 
-    registerIpc(manager)
+    // 이걸 설정하지 않으면 Windows가 토스트를 조용히 무시한다. P15-8
+    app.setAppUserModelId('com.cvmux.app')
+
+    registerIpc(manager, notifier)
     createWindow()
 
     app.on('activate', () => {

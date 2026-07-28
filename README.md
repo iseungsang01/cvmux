@@ -1,5 +1,7 @@
 # cvmux
 
+> claude 좀 대충 쓰지마요 cvmux~
+
 Windows용 터미널 워크스페이스 매니저. 여러 PowerShell 세션을 동시에 돌리고,
 **왼쪽 사이드바에서 각 세션이 지금 무엇을 하고 있는지 한눈에 보는 것**이 목적이다.
 
@@ -45,6 +47,11 @@ brew tap manaflow-ai/cmux && brew install --cask cmux
 **확실한 신호와 추측을 구분한다.** 점선 링은 휴리스틱으로 짐작한 것이고,
 실선 링 + 점은 프로세스가 직접 "나 좀 봐줘"라고 말한 것이다.
 
+각 항목에는 상태 외에 작업 디렉토리, **git 브랜치**(변경사항이 있으면 점, 앞서거나
+뒤처지면 `↑2 ↓1`, rebase 중이면 배지), **리슨 중인 포트**(`:5173`), 그리고 마지막 출력
+줄이 함께 뜬다. 포트는 셸이 아니라 **세션이 띄운 프로세스 트리 전체**를 훑어서 찾으므로
+`npm run dev`가 연 포트도 잡힌다.
+
 ## 에이전트에서 알림 보내기
 
 cvmux는 터미널 알림 시퀀스(OSC 9 / OSC 777 / OSC 99 / BEL)를 감지한다.
@@ -59,8 +66,58 @@ Write-Host -NoNewline "$e]9;빌드가 끝났습니다$b"
 Write-Host -NoNewline "$e]777;notify;Claude Code;검토가 필요합니다$b"
 ```
 
-Claude Code라면 `Stop` 훅에 걸어두면 된다. 세션 안에서는 `$env:CVMUX`가 `1`,
-`$env:CVMUX_SESSION_ID`에 세션 ID가 들어 있으므로 cvmux 안에서 도는지 구분할 수 있다.
+헬퍼 스크립트도 있다.
+
+```powershell
+.\scripts\cvmux-notify.ps1 "테스트 12개 통과"
+.\scripts\cvmux-notify.ps1 -Title "빌드" "배포 준비 완료"
+```
+
+**왜 `Write-Host`인가.** 에이전트 훅이나 파이프라인에서는 stdout이 캡처돼 터미널까지
+도달하지 못하는 경우가 있다. `Write-Host`는 stdout 리다이렉트와 무관하게 콘솔로 직접
+쓴다 — 네 가지 방식을 PTY로 실측해 확인했다(`Write-Host`, `[Console]::Write`, 각각
+`1>$null` 리다이렉트 상태 포함, 전부 도달).
+
+Claude Code라면 `~/.claude/settings.json` 에 훅을 건다. `Notification`은 Claude가
+입력을 기다릴 때, `Stop`은 응답을 마쳤을 때 발생한다.
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -Command \"$e=[char]27;$b=[char]7;Write-Host -NoNewline \\\"$e]777;notify;Claude Code;확인이 필요합니다$b\\\"\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+훅이 없어도 상관없다. 출력이 멎었는데 프롬프트가 아니면 cvmux가 알아서 "입력 대기(추정)"로
+표시한다. 훅은 그 추측을 확신으로 바꿔줄 뿐이다.
+
+세션 안에서는 `$env:CVMUX`가 `1`이고 `$env:CVMUX_SESSION_ID`에 세션 ID가 들어 있으므로
+cvmux 안에서 도는지 구분할 수 있다.
+
+## 색상
+
+cvmux는 트루컬러(24비트)를 완전히 지원한다. 세션에는 `TERM=xterm-256color`와
+`COLORTERM=truecolor`가 설정된다.
+
+한 가지 함정이 있다. **다른 에이전트 CLI 안에서 cvmux를 실행하면** 그 CLI가 자기 자식
+셸에 심어둔 `NO_COLOR=1`을 Electron이 상속하고, 그게 PTY까지 흘러 세션 안의 모든 도구가
+흑백이 된다. 실제로 이 프로젝트를 만들다가 겪었다 — Node의 `getColorDepth()`가 `1`(흑백)을
+반환했다.
+
+cvmux 세션은 색을 완전히 지원하는 **새 터미널**이므로 런처의 색상 정책을 물려받지 않는다.
+세션 환경에서 `NO_COLOR`를 제거한다(같은 조건에서 `colorDepth`가 `1` → `24`로 바뀌는 것을
+확인했다). 정말로 색을 끄고 싶으면 `CVMUX_NO_COLOR=1`로 명시하면 된다.
 
 셸이 [OSC 133 셸 통합](https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/prompts-data-model.md)을
 지원하면 프롬프트 정규식 대신 그 신호를 쓰므로 상태 판정이 정확해진다.
@@ -126,19 +183,20 @@ Select-String -Path src\*\*.ts,src\*\*\*.tsx -Pattern 'P\d+-\d+'
 
 - 다중 세션 생성/전환/종료/재시작, 세션당 프로세스 트리 정리
 - 사이드바 상태 표시, 마지막 출력 줄 미리보기, 작업 디렉토리 표시
+- **git 브랜치 · 변경 여부 · ahead/behind · rebase 등 진행 중 작업 표시**
+- **리슨 포트 자동 감지** (`:5173` 형태, 세션이 띄운 프로세스 트리 전체가 대상)
+- **Windows 토스트 알림** — 보고 있지 않은 세션이 알림을 보낼 때만, 클릭하면 그 세션으로 이동
 - OSC 9/777/99/BEL 알림 감지, OSC 133 셸 통합, OSC 0/2 제목, OSC 7 디렉토리
 - 전체화면 TUI(vim/less) 감지 시 휴리스틱 자동 비활성화
 - 한글 UTF-8 출력 (세션 한정 인코딩 부트스트랩, 프로필은 건드리지 않음)
 - WebGL 렌더링 + 컨텍스트 손실 시 자동 폴백, DPI 변경 대응
 - 대용량 붙여넣기 확인, bracketed paste
 
-**아직 안 되는 것 (2차)**
+**아직 안 되는 것 (3차)**
 
-- git 브랜치 / PR 상태 표시
-- 리슨 포트 자동 감지 (`:5173` 같은 표시)
 - 분할 창
-- 세션 영속성 (앱 재시작 시 스크롤백 복원 — 현재는 렌더러 재로드까지만)
-- Windows 토스트 알림
+- 세션 영속성 (앱 재시작 시 복원 — 현재는 렌더러 재로드까지만)
+- PR 상태 (네트워크 호출과 인증이 필요해 이번 범위에서 제외)
 - 인앱 브라우저, SSH (cmux에는 있지만 이 프로젝트 범위 밖)
 
 ## 구조

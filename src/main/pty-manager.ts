@@ -10,10 +10,12 @@ import { POLICY } from '@shared/policy'
 import type {
   CreateSessionOptions,
   CreateSessionResult,
+  GitInfo,
   SessionExitInfo,
   SessionMeta,
   SessionSnapshot
 } from '@shared/types'
+import { ProbeScheduler, gitInfoEqual, portsEqual } from './probe-scheduler'
 import { SessionState } from './session-state'
 
 /**
@@ -62,10 +64,12 @@ function shellArgs(shell: string): string[] {
   return []
 }
 
-/** 존재하지 않는 cwd는 홈으로 폴백하고 경고를 남긴다. P11-1 / P11-2 */
-function resolveCwd(requested: string | undefined): { cwd: string; warning: string | null } {
-  const home = homedir()
-  if (!requested) return { cwd: home, warning: null }
+/** 존재하지 않는 cwd는 폴백하고 경고를 남긴다. P11-1 / P11-2 / P16-4 */
+function resolveCwd(
+  requested: string | undefined,
+  fallback: string
+): { cwd: string; warning: string | null } {
+  if (!requested) return { cwd: fallback, warning: null }
   try {
     if (existsSync(requested) && statSync(requested).isDirectory()) {
       return { cwd: requested, warning: null }
@@ -73,7 +77,15 @@ function resolveCwd(requested: string | undefined): { cwd: string; warning: stri
   } catch {
     // 접근 불가 — 폴백한다
   }
-  return { cwd: home, warning: `작업 디렉토리를 찾을 수 없어 홈으로 시작합니다: ${requested}` }
+  return {
+    cwd: fallback,
+    warning: `작업 디렉토리를 찾을 수 없어 ${fallback} 에서 시작합니다: ${requested}`
+  }
+}
+
+export interface PtyManagerOptions {
+  /** 아무 것도 지정되지 않았을 때 세션이 시작할 디렉토리. 기본은 사용자 홈 */
+  defaultCwd?: string
 }
 
 /**
@@ -111,6 +123,9 @@ class Session {
   exitSignal: number | null = null
   cols: number
   rows: number
+  /** 주변 정보 — 프로브가 채운다. P13 / P14 */
+  git: GitInfo | null = null
+  ports: number[] = []
 
   private startedAt = 0
   /** 렌더러 재연결 시 화면을 되살릴 최근 출력. P9-1 */
@@ -122,14 +137,17 @@ class Session {
 
   constructor(
     options: CreateSessionOptions,
+    defaultCwd: string,
     private readonly emit: {
       data(id: string, chunk: string): void
       meta(id: string): void
       exit(info: SessionExitInfo): void
       notify(id: string, text: string): void
+      /** 셸이 디렉토리를 옮겼다 — git 정보를 다시 봐야 한다. P13-7 */
+      cwdChanged(previousCwd: string): void
     }
   ) {
-    const resolved = resolveCwd(options.cwd)
+    const resolved = resolveCwd(options.cwd, defaultCwd)
     this.cwd = resolved.cwd
     this.warning = resolved.warning
     this.shell = options.shell ?? ''
@@ -141,16 +159,24 @@ class Session {
       onChange: () => this.emit.meta(this.id),
       onNotify: (text) => this.emit.notify(this.id, text),
       onCwd: (cwd) => {
-        if (cwd && cwd !== this.cwd) {
-          this.cwd = cwd
-          this.emit.meta(this.id)
-        }
+        if (!cwd || cwd === this.cwd) return
+        const previous = this.cwd
+        this.cwd = cwd
+        // 새 디렉토리는 다른 저장소일 수 있다. 낡은 git 정보를 그대로 두지 않는다. P13-7
+        this.git = null
+        this.emit.cwdChanged(previous)
+        this.emit.meta(this.id)
       }
     })
   }
 
   get alive(): boolean {
     return this.proc !== null
+  }
+
+  /** 포트 조사에서 프로세스 트리의 루트로 쓴다. P14-8 */
+  get pid(): number | null {
+    return this.proc?.pid ?? null
   }
 
   /** PTY를 띄운다. 실패해도 예외를 던지지 않고 세션을 오류 상태로 남긴다. P1-5 */
@@ -310,6 +336,8 @@ class Session {
       exitSignal: this.exitSignal,
       warning: this.warning,
       altScreen: this.state.altScreen,
+      git: this.git,
+      ports: this.ports,
       createdAt: this.createdAt
     }
   }
@@ -355,8 +383,23 @@ function buildEnv(sessionId: string): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value
   }
+  // 터미널의 능력은 세션이 결정한다 — 런처가 물려준 값이 아니라. P3-8
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
+
+  /*
+   * 런처의 색상 정책이 세션으로 새어들지 않게 한다 (P3-7).
+   *
+   * 다른 에이전트 CLI 안에서 cvmux를 띄우면 그 CLI가 자식 셸에 심어둔
+   * NO_COLOR=1을 Electron이 상속하고, 그게 다시 PTY로 흘러 세션 안의 모든
+   * 도구가 흑백이 된다. cvmux 세션은 트루컬러를 완전히 지원하는 새 터미널이므로
+   * 그 제약을 물려받을 이유가 없다. 정말 색을 끄고 싶으면 CVMUX_NO_COLOR로 말한다.
+   */
+  if (process.env.CVMUX_NO_COLOR === '1') {
+    env.NO_COLOR = '1'
+  } else {
+    delete env.NO_COLOR
+  }
   // 에이전트 훅이 자신이 cvmux 안에서 도는지 알 수 있게 한다
   env.CVMUX = '1'
   env.CVMUX_SESSION_ID = sessionId
@@ -374,6 +417,40 @@ export interface PtyManagerEvents {
 
 export class PtyManager extends EventEmitter<PtyManagerEvents> {
   private readonly sessions = new Map<string, Session>()
+  private readonly defaultCwd: string
+
+  constructor(options: PtyManagerOptions = {}) {
+    super()
+    this.defaultCwd = options.defaultCwd ?? homedir()
+  }
+
+  /** git·포트 정보를 주기적으로 채운다. P13 / P14 */
+  private readonly probes = new ProbeScheduler(
+    () =>
+      [...this.sessions.values()].map((s) => ({
+        id: s.id,
+        pid: s.pid,
+        cwd: s.cwd,
+        alive: s.alive,
+        busy: s.state.status === 'busy'
+      })),
+    (id, patch) => {
+      const session = this.sessions.get(id)
+      if (!session) return
+
+      let changed = false
+      if (patch.git !== undefined && !gitInfoEqual(session.git, patch.git)) {
+        session.git = patch.git
+        changed = true
+      }
+      if (patch.ports !== undefined && !portsEqual(session.ports, patch.ports)) {
+        session.ports = patch.ports
+        changed = true
+      }
+      // 값이 그대로면 IPC를 보내지 않는다. 폴링이 렌더러를 매초 흔들면 안 된다
+      if (changed) this.emit('meta', session.toMeta())
+    }
+  )
 
   create(options: CreateSessionOptions = {}): CreateSessionResult {
     // 상한 초과는 예외가 아니라 사유가 담긴 실패다. P1-8 / P8-3 / P12
@@ -384,18 +461,21 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       }
     }
 
-    const session = new Session(options, {
+    const session = new Session(options, this.defaultCwd, {
       data: (id, chunk) => this.emit('data', id, chunk),
       meta: (id) => {
         const s = this.sessions.get(id)
         if (s) this.emit('meta', s.toMeta())
       },
       exit: (info) => this.emit('exit', info),
-      notify: (id, text) => this.emit('notify', id, text)
+      notify: (id, text) => this.emit('notify', id, text),
+      cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd)
     })
 
     this.sessions.set(session.id, session)
     session.start()
+    // 세션이 없는 동안 프로브는 자고 있다. P14-6
+    this.probes.wake()
 
     const meta = session.toMeta()
     this.emit('created', meta)
@@ -410,6 +490,10 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   snapshot(id: string): SessionSnapshot | null {
     return this.sessions.get(id)?.snapshot() ?? null
+  }
+
+  metaOf(id: string): SessionMeta | null {
+    return this.sessions.get(id)?.toMeta() ?? null
   }
 
   /** 알 수 없는 세션 id는 조용히 false — 예외로 렌더러를 죽이지 않는다. P1-9 */
@@ -430,7 +514,9 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   restart(id: string): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
-    return session.restart()
+    const ok = session.restart()
+    if (ok) this.probes.wake()
+    return ok
   }
 
   setTitle(id: string, title: string | null): boolean {
@@ -474,6 +560,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   /** 앱 종료 — 모든 프로세스 트리를 정리한다. 고아 프로세스 금지. P10-2 */
   async disposeAll(): Promise<void> {
+    this.probes.stop()
     const all = [...this.sessions.values()]
     this.sessions.clear()
     await Promise.all(all.map((s) => s.dispose()))
