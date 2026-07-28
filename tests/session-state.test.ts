@@ -8,7 +8,7 @@
  *
  * 실행: npm test
  */
-import { SessionState } from '../src/main/session-state'
+import { SessionState } from '../src/core/session-state'
 
 const results: string[] = []
 let failed = 0

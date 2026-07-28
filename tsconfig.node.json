@@ -16,11 +16,14 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "paths": {
-      "@shared/*": ["./src/shared/*"]
+      "@shared/*": ["./src/shared/*"],
+      "@core/*": ["./src/core/*"]
     }
   },
   "include": [
     "src/main/**/*.ts",
+    "src/core/**/*.ts",
+    "src/daemon/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts",

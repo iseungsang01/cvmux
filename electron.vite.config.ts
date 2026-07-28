@@ -3,14 +3,21 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 const shared = resolve(__dirname, 'src/shared')
+const core = resolve(__dirname, 'src/core')
 
 export default defineConfig({
   main: {
     // node-pty is a native module — it must stay external (P2 전반)
     plugins: [externalizeDepsPlugin()],
-    resolve: { alias: { '@shared': shared } },
+    resolve: { alias: { '@shared': shared, '@core': core } },
     build: {
-      rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts') } }
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          // 세션을 들고 있는 데몬. Electron이 아니라 ELECTRON_RUN_AS_NODE로 돈다. P20
+          daemon: resolve(__dirname, 'src/daemon/index.ts')
+        }
+      }
     }
   },
   preload: {
