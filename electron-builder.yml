@@ -17,6 +17,9 @@ npmRebuild: false
 files:
   - out/**/*
   - package.json
+  # 트레이 아이콘은 런타임에 읽는다 — buildResources는 앱 안에 들어가지 않으므로
+  # 이 한 장은 따로 담아야 한다. P18
+  - build/icon.png
   - '!node_modules/**/*'
   - node_modules/node-pty/**/*
 

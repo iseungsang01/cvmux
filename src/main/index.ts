@@ -9,6 +9,7 @@ import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from './store'
+import { createTray, type TrayController } from './tray'
 
 /**
  * 개발 중에는 앱을 띄운 디렉토리에서 첫 세션을 시작한다 — 터미널 앱의 관례이고,
@@ -18,17 +19,16 @@ const manager = new PtyManager({
   defaultCwd: app.isPackaged ? homedir() : process.cwd()
 })
 
-/** 토스트를 클릭하면 창을 깨우고 그 세션으로 전환한다. P15-5 */
+/** 토스트를 클릭하면 창을 깨우고 그 세션으로 전환한다. P15-5 / P18-2 */
 const notifier = new Notifier((sessionId) => {
+  showWindow()
   const win = mainWindow
   if (!win || win.isDestroyed()) return
-  if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
   win.webContents.send(IPC.EVT_ACTIVATE, sessionId)
 })
 
 let mainWindow: BrowserWindow | null = null
+let tray: TrayController | null = null
 let store: SessionStore | null = null
 let persistTimer: NodeJS.Timeout | null = null
 let persistDebounce: NodeJS.Timeout | null = null
@@ -58,9 +58,64 @@ function schedulePersist(): void {
     persistNow()
   }, 1000)
 }
-/** 종료 확인을 통과했는가 — close 핸들러의 재진입을 막는다. P10-1 */
-let allowClose = false
+/** 진짜로 끝내는 중인가 — close 핸들러가 창을 숨기지 않고 통과시킨다. P10-1 / P18-1 */
+let quitting = false
 let cleaningUp = false
+
+/**
+ * 창을 되살린다 (P18-3).
+ *
+ * 트레이 클릭, 토스트 클릭, 두 번째 인스턴스 실행이 모두 이 길로 온다 —
+ * 창을 깨우는 방법이 세 군데로 갈라지면 하나가 조용히 어긋난다.
+ */
+function showWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/** 실행 중인 세션을 죽여도 되는지 묻는다. P10-1 */
+async function confirmQuit(busy: number, parent: BrowserWindow | null): Promise<boolean> {
+  const options = {
+    type: 'question' as const,
+    buttons: ['그래도 종료', '취소'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'cvmux',
+    message: `${busy}개 세션이 실행 중입니다.`,
+    detail: '종료하면 실행 중인 명령과 그 하위 프로세스가 모두 종료됩니다.'
+  }
+  const { response } =
+    parent && !parent.isDestroyed()
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options)
+  return response === 0
+}
+
+/**
+ * 트레이에서 앱을 완전히 끈다 (P18-4).
+ *
+ * 창이 숨겨진 채로 물을 수는 없다 — 무엇이 돌고 있는지 보여준 다음에 묻는다.
+ */
+function requestQuit(): void {
+  const busy = manager.busyCount()
+  if (busy === 0) {
+    quitting = true
+    app.quit()
+    return
+  }
+
+  showWindow()
+  void confirmQuit(busy, mainWindow).then((ok) => {
+    if (!ok) return
+    quitting = true
+    app.quit()
+  })
+}
 
 /**
  * 처리되지 않은 예외로 앱 전체가 죽지 않게 한다 (P9-3).
@@ -136,28 +191,31 @@ function createWindow(): void {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
   })
 
-  // 실행 중인 세션이 있으면 확인을 받는다. P10-1
   win.on('close', (event) => {
-    if (allowClose) return
+    if (quitting) return
+
+    /*
+     * 창을 닫는 것은 앱을 끄는 것이 아니다 (P18-1).
+     *
+     * 세션은 계속 돌고 앱은 트레이로 물러난다. 확인 대화상자도 여기서 띄우지
+     * 않는다 — 아무것도 죽이지 않으니 물을 것이 없다. 종료 확인은 트레이의
+     * '종료'로 옮겼다(P18-4).
+     */
+    if (tray) {
+      event.preventDefault()
+      win.hide()
+      return
+    }
+
+    // 트레이를 만들지 못한 환경에서는 창 닫기가 곧 종료다. P10-1 / P18-6
     const busy = manager.busyCount()
     if (busy === 0) return
-
     event.preventDefault()
-    void dialog
-      .showMessageBox(win, {
-        type: 'question',
-        buttons: ['그래도 종료', '취소'],
-        defaultId: 1,
-        cancelId: 1,
-        title: 'cvmux',
-        message: `${busy}개 세션이 실행 중입니다.`,
-        detail: '종료하면 실행 중인 명령과 그 하위 프로세스가 모두 종료됩니다.'
-      })
-      .then(({ response }) => {
-        if (response !== 0) return
-        allowClose = true
-        win.close()
-      })
+    void confirmQuit(busy, win).then((ok) => {
+      if (!ok) return
+      quitting = true
+      win.close()
+    })
   })
 
   win.on('closed', () => {
@@ -175,11 +233,8 @@ function createWindow(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-  })
+  // 트레이에 숨어 있을 때 바로가기를 다시 눌러도 창이 돌아와야 한다. P10-4 / P18-5
+  app.on('second-instance', showWindow)
 
   void app.whenReady().then(() => {
     if (!conPtySupported()) {
@@ -222,10 +277,31 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    /*
+     * 트레이는 창을 닫아도 앱이 살아있다는 유일한 표시다 (P18).
+     *
+     * 만들지 못하면 상주를 포기한다 — 트레이도 없고 창도 닫히지 않는 앱은
+     * 작업 관리자로만 끌 수 있고, 그건 버그다(P18-6).
+     */
+    tray = createTray({
+      show: showWindow,
+      quit: requestQuit,
+      sessionCount: () => manager.list().length
+    })
+    if (!tray) {
+      console.warn('[cvmux] 트레이를 만들지 못했습니다. 창을 닫으면 앱이 종료됩니다. P18-6')
+    }
+
     // 주기 저장 + 세션이 생기거나 사라질 때 저장. P16-1
     persistTimer = setInterval(persistNow, POLICY.PERSIST_INTERVAL_MS)
-    manager.on('created', schedulePersist)
-    manager.on('closed', schedulePersist)
+    manager.on('created', () => {
+      schedulePersist()
+      tray?.refresh()
+    })
+    manager.on('closed', () => {
+      schedulePersist()
+      tray?.refresh()
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -234,6 +310,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('window-all-closed', () => {
+  // 트레이에 남아 있는 동안에는 창이 하나도 없어도 앱이 산다. P18-1
+  if (tray) return
   app.quit()
 })
 
@@ -241,8 +319,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', (event) => {
   if (cleaningUp) return
   cleaningUp = true
-  allowClose = true
+  quitting = true
   event.preventDefault()
+
+  tray?.destroy()
+  tray = null
 
   if (persistTimer !== null) {
     clearInterval(persistTimer)
