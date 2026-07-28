@@ -296,7 +296,14 @@ export class SessionState {
       return
     }
 
-    const kind = promptKind(this.parser.currentLine)
+    /*
+     * 커서가 놓인 줄이 비어 있으면 마지막으로 확정된 줄을 본다.
+     *
+     * 셸이 프롬프트를 그린 뒤 화면을 정리하느라 개행을 흘리면 "현재 줄"은
+     * 비어버리지만, 화면에는 프롬프트가 그대로 있다. 그때 마지막 줄이 곧
+     * 프롬프트다. 판정 대상이 버퍼의 마지막 줄이라는 점은 그대로다. P4-12
+     */
+    const kind = promptKind(this.parser.previewLine)
     // exact = 프롬프트에서 대기, typing = 사용자가 명령을 치는 중 → 둘 다 idle. P4-7 / P4-11
     this.set(kind === 'no' ? 'waiting' : 'idle', 'inferred')
   }

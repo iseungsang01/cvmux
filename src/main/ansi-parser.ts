@@ -271,11 +271,19 @@ export class AnsiParser {
         }
         break
       }
-      // CUP/HVP — 커서 이동. 줄이 바뀌므로 현재 줄 추적을 초기화한다
+      /*
+       * CUP/HVP — 커서 이동. 열만 옮기고 줄 내용은 건드리지 않는다.
+       *
+       * PSReadLine은 프롬프트를 다시 그린 뒤 `ESC[1;41H`로 프롬프트 끝에 커서를
+       * 되돌린다. 여기서 줄을 비우면 화면에 멀쩡히 있는 프롬프트를 잃어버려
+       * "입력 대기"로 오판한다. 커서가 옮겨간 자리에 무엇이 쓰이든 put()이
+       * 그 위치부터 덮어쓰므로 내용은 자연히 맞춰진다.
+       */
       case 'H':
       case 'f': {
-        this.line = ''
-        this.col = 0
+        const parts = params.split(';')
+        const col = parts.length > 1 ? Number.parseInt(parts[1], 10) : 1
+        this.col = Math.max(0, (Number.isFinite(col) ? col : 1) - 1)
         break
       }
       // CHA — 열 이동

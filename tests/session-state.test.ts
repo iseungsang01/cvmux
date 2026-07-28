@@ -69,6 +69,29 @@ async function main(): Promise<void> {
     s.dispose()
   }
 
+  // ── P4-7 / P4-12: PSReadLine이 프롬프트를 그린 뒤 화면을 정리하고 CUP으로 복귀하는
+  //    실제 패턴. 저장된 스크롤백에서 그대로 가져왔다. 이 케이스에서 프롬프트를
+  //    놓치면 멀쩡히 대기 중인 세션이 "입력 대기"로 잘못 표시된다.
+  {
+    const { s } = make()
+    s.ingest('\x1b[?25l\x1b[8;43;144t\x1b[HPS C:\\Users\\lss\\Documents\\GitHub\\cvmux>\x1b[K')
+    s.ingest('\r\n\x1b[K'.repeat(40))
+    s.ingest('\x1b[K\x1b[1;41H\x1b[?25h')
+    await sleep(IDLE_WAIT)
+    check('P4-12 화면 정리 + CUP 복귀 후에도 프롬프트 인식', s.status === 'idle', s.status)
+    s.dispose()
+  }
+
+  // ── CUP이 줄 내용을 지우지 않아야 한다 (위 케이스의 근본 원인)
+  {
+    const { s } = make()
+    s.ingest('PS C:\\Users\\lss> ')
+    s.ingest('\x1b[1;18H') // 프롬프트 끝으로 커서 복귀
+    await sleep(IDLE_WAIT)
+    check('CUP이 현재 줄을 지우지 않음', s.status === 'idle', s.status)
+    s.dispose()
+  }
+
   // ── P4-1: OSC 9 알림 → attention + unread
   {
     const { s, notes } = make()

@@ -17,6 +17,7 @@ import type {
 } from '@shared/types'
 import { ProbeScheduler, gitInfoEqual, portsEqual } from './probe-scheduler'
 import { SessionState } from './session-state'
+import { trimScrollback, type PersistedSession } from './store'
 
 /**
  * PowerShell 세션 부트스트랩 (P3-3).
@@ -25,12 +26,30 @@ import { SessionState } from './session-state'
  * 건드리지 않고 세션 한정으로 인코딩만 바꾼다. 인용 지옥을 피하려고
  * -EncodedCommand(UTF-16LE Base64)로 넘긴다.
  */
-const PS_BOOTSTRAP = [
-  '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
-  '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
-  '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)',
-  'Clear-Host'
-].join('; ')
+function psBootstrap(keepScreen: boolean): string {
+  const parts = [
+    '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)'
+  ]
+  // 복원된 세션에서는 화면을 지우지 않는다 — 지우면 복원한 스크롤백이 날아간다. P16-6
+  if (!keepScreen) parts.push('Clear-Host')
+  return parts.join('; ')
+}
+
+/**
+ * 셸과 ConPTY가 시작하면서 보내는 화면 지우기(ED)를 걷어낸다 (P16-6).
+ *
+ * 복원된 세션에서만 쓴다. 이걸 하지 않으면 애써 되살린 스크롤백을 새 셸의 첫
+ * 출력이 통째로 지워버린다.
+ *
+ * 커서 이동(CUP)은 건드리지 않는다. 한때 같이 지웠더니 PSReadLine이 커서를
+ * 되돌리지 못해 새 프롬프트가 복원된 프롬프트 옆에 나란히 그려졌다. 커서는
+ * 맨 위로 가도 괜찮다 — 지우지만 않으면 복원분은 스크롤백에 그대로 남는다.
+ */
+function stripScreenClear(chunk: string): string {
+  return chunk.replace(/\x1b\[[0-3]?J/g, '')
+}
 
 function encodePowerShellCommand(command: string): string {
   return Buffer.from(command, 'utf16le').toString('base64')
@@ -56,10 +75,15 @@ function resolveShell(preferred?: string): string | null {
   return null
 }
 
-function shellArgs(shell: string): string[] {
+function shellArgs(shell: string, keepScreen: boolean): string[] {
   const name = basename(shell).toLowerCase()
   if (name === 'pwsh.exe' || name === 'powershell.exe') {
-    return ['-NoLogo', '-NoExit', '-EncodedCommand', encodePowerShellCommand(PS_BOOTSTRAP)]
+    return [
+      '-NoLogo',
+      '-NoExit',
+      '-EncodedCommand',
+      encodePowerShellCommand(psBootstrap(keepScreen))
+    ]
   }
   return []
 }
@@ -87,6 +111,9 @@ export interface PtyManagerOptions {
   /** 아무 것도 지정되지 않았을 때 세션이 시작할 디렉토리. 기본은 사용자 홈 */
   defaultCwd?: string
 }
+
+/** 복원된 스크롤백과 새 셸의 출력 사이에 긋는 선. P16-6 */
+const RESTORE_DIVIDER = `\r\n\x1b[90m${'─'.repeat(12)} 이전 세션 (복원됨) ${'─'.repeat(12)}\x1b[0m\r\n`
 
 /**
  * 프로세스 트리를 통째로 종료한다 (P1-6 / P10-2).
@@ -128,6 +155,10 @@ class Session {
   ports: number[] = []
 
   private startedAt = 0
+  /** 저장된 스크롤백에서 되살아난 세션인가. P16-6 */
+  private restored = false
+  /** 이 시각까지는 화면 지우기 시퀀스를 걷어낸다 (복원 화면 보호). P16-6 */
+  private stripClearUntil = 0
   /** 렌더러 재연결 시 화면을 되살릴 최근 출력. P9-1 */
   private replay = ''
   /** IPC 배칭 버퍼. P3-4 */
@@ -138,6 +169,7 @@ class Session {
   constructor(
     options: CreateSessionOptions,
     defaultCwd: string,
+    restoredScrollback: string | null,
     private readonly emit: {
       data(id: string, chunk: string): void
       meta(id: string): void
@@ -154,6 +186,13 @@ class Session {
     this.userTitle = options.title ?? null
     this.cols = clampCols(options.cols)
     this.rows = clampRows(options.rows)
+
+    if (restoredScrollback) {
+      // 복원된 것은 텍스트일 뿐 프로세스가 아니다. 새 셸의 출력과 섞이지 않게
+      // 구분선을 긋는다 — 이전 화면인 척 하면 안 된다. P16-6
+      this.replay = restoredScrollback + RESTORE_DIVIDER
+      this.restored = true
+    }
 
     this.state = new SessionState({
       onChange: () => this.emit.meta(this.id),
@@ -189,7 +228,7 @@ class Session {
     this.shell = shell
 
     try {
-      const proc = pty.spawn(shell, shellArgs(shell), {
+      const proc = pty.spawn(shell, shellArgs(shell, this.restored), {
         name: 'xterm-256color',
         cols: this.cols,
         rows: this.rows,
@@ -200,6 +239,8 @@ class Session {
 
       this.proc = proc
       this.startedAt = Date.now()
+      // 셸이 뜨는 동안 오는 클리어만 막는다. 그 뒤의 Clear-Host는 사용자 의도다. P16-6
+      if (this.restored) this.stripClearUntil = this.startedAt + 1500
 
       proc.onData((chunk) => this.onData(chunk))
       proc.onExit(({ exitCode, signal }) => this.onExit(exitCode, signal ?? null))
@@ -222,8 +263,18 @@ class Session {
     this.emit.meta(this.id)
   }
 
-  private onData(chunk: string): void {
+  private onData(rawChunk: string): void {
     if (this.disposed) return
+
+    let chunk = rawChunk
+    if (this.stripClearUntil > 0) {
+      if (Date.now() < this.stripClearUntil) {
+        chunk = stripScreenClear(chunk)
+      } else {
+        this.stripClearUntil = 0
+      }
+    }
+
     this.state.ingest(chunk)
     this.appendReplay(chunk)
 
@@ -319,6 +370,11 @@ class Session {
 
   snapshot(): SessionSnapshot {
     return { meta: this.toMeta(), replay: this.replay }
+  }
+
+  /** 디스크에 남길 스크롤백. P16-5 */
+  get replayText(): string {
+    return this.replay
   }
 
   toMeta(): SessionMeta {
@@ -453,6 +509,13 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   )
 
   create(options: CreateSessionOptions = {}): CreateSessionResult {
+    return this.spawn(options, null)
+  }
+
+  private spawn(
+    options: CreateSessionOptions,
+    restoredScrollback: string | null
+  ): CreateSessionResult {
     // 상한 초과는 예외가 아니라 사유가 담긴 실패다. P1-8 / P8-3 / P12
     if (this.sessions.size >= POLICY.MAX_SESSIONS) {
       return {
@@ -461,7 +524,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       }
     }
 
-    const session = new Session(options, this.defaultCwd, {
+    const session = new Session(options, this.defaultCwd, restoredScrollback, {
       data: (id, chunk) => this.emit('data', id, chunk),
       meta: (id) => {
         const s = this.sessions.get(id)
@@ -494,6 +557,37 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   metaOf(id: string): SessionMeta | null {
     return this.sessions.get(id)?.toMeta() ?? null
+  }
+
+  /** 디스크에 남길 형태로 뽑는다. P16-1 */
+  serialize(): PersistedSession[] {
+    return [...this.sessions.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((session) => ({
+        cwd: session.cwd,
+        // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
+        title: session.userTitle,
+        scrollback: trimScrollback(session.replayText)
+      }))
+  }
+
+  /**
+   * 저장된 세션을 되살린다. 프로세스가 아니라 자리(작업 디렉토리)와 화면을 복원한다.
+   * @returns 실제로 복원된 개수
+   */
+  restore(sessions: PersistedSession[]): number {
+    let restored = 0
+    for (const item of sessions) {
+      // 상한을 넘으면 조용히 멈춘다. P16-7
+      if (this.sessions.size >= POLICY.MAX_SESSIONS) break
+      // 사라진 디렉토리는 resolveCwd가 폴백하고 경고를 남긴다. P16-4
+      const result = this.spawn(
+        { cwd: item.cwd, title: item.title ?? undefined },
+        item.scrollback || null
+      )
+      if (result.ok) restored++
+    }
+    return restored
   }
 
   /** 알 수 없는 세션 id는 조용히 false — 예외로 렌더러를 죽이지 않는다. P1-9 */

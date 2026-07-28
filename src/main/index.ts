@@ -7,6 +7,7 @@ import { IPC } from '@shared/types'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty-manager'
+import { SessionStore } from './store'
 
 /**
  * 개발 중에는 앱을 띄운 디렉토리에서 첫 세션을 시작한다 — 터미널 앱의 관례이고,
@@ -27,6 +28,24 @@ const notifier = new Notifier((sessionId) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+let store: SessionStore | null = null
+let persistTimer: NodeJS.Timeout | null = null
+let persistDebounce: NodeJS.Timeout | null = null
+
+/** 지금 즉시 저장. P16-1 */
+function persistNow(): void {
+  if (!store) return
+  store.save({ version: 1, savedAt: Date.now(), sessions: manager.serialize() })
+}
+
+/** 세션을 여러 개 연달아 만들 때 매번 쓰지 않도록 묶는다 */
+function schedulePersist(): void {
+  if (persistDebounce !== null) return
+  persistDebounce = setTimeout(() => {
+    persistDebounce = null
+    persistNow()
+  }, 1000)
+}
 /** 종료 확인을 통과했는가 — close 핸들러의 재진입을 막는다. P10-1 */
 let allowClose = false
 let cleaningUp = false
@@ -148,8 +167,25 @@ if (!app.requestSingleInstanceLock()) {
     // 이걸 설정하지 않으면 Windows가 토스트를 조용히 무시한다. P15-8
     app.setAppUserModelId('com.cvmux.app')
 
+    store = new SessionStore(join(app.getPath('userData'), 'sessions.json'))
+    const saved = store.load()
+
     registerIpc(manager, notifier)
     createWindow()
+
+    /*
+     * 창을 만든 직후, 렌더러가 로드되기 전에 복원한다. restore는 동기적이라
+     * 렌더러의 첫 list() 호출에는 이미 복원된 세션이 담긴다. P16
+     */
+    if (saved !== null && saved.sessions.length > 0) {
+      const restored = manager.restore(saved.sessions)
+      console.log(`[cvmux] 세션 ${restored}개를 복원했습니다`)
+    }
+
+    // 주기 저장 + 세션이 생기거나 사라질 때 저장. P16-1
+    persistTimer = setInterval(persistNow, POLICY.PERSIST_INTERVAL_MS)
+    manager.on('created', schedulePersist)
+    manager.on('closed', schedulePersist)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -167,6 +203,18 @@ app.on('before-quit', (event) => {
   cleaningUp = true
   allowClose = true
   event.preventDefault()
+
+  if (persistTimer !== null) {
+    clearInterval(persistTimer)
+    persistTimer = null
+  }
+  if (persistDebounce !== null) {
+    clearTimeout(persistDebounce)
+    persistDebounce = null
+  }
+  // 세션을 정리하기 전에 마지막으로 남긴다 — disposeAll이 목록을 비운다. P16-1
+  persistNow()
+
   void manager.disposeAll().finally(() => {
     app.exit(0)
   })
