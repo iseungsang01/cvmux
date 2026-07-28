@@ -1,7 +1,9 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 
 import { POLICY } from '@shared/policy'
+import type { PaneNode, Workspace } from '@shared/types'
 
 /**
  * 세션 목록을 디스크에 남긴다 (POLICY.md P16).
@@ -18,10 +20,33 @@ export interface PersistedSession {
   scrollback: string
 }
 
+/**
+ * 저장되는 pane 배치.
+ *
+ * 세션을 id가 아니라 **순번**으로 가리킨다. 복원할 때 세션 id는 새로 발급되므로
+ * 저장된 id는 아무 의미가 없다. 순번은 sessions 배열의 위치를 뜻한다.
+ */
+export type PersistedPane =
+  | { kind: 'leaf'; sessionIndex: number }
+  | {
+      kind: 'split'
+      direction: 'row' | 'column'
+      children: PersistedPane[]
+      sizes: number[]
+    }
+
+export interface PersistedWorkspace {
+  title: string | null
+  root: PersistedPane
+  /** 포커스된 잎이 가리키는 세션 순번 */
+  focusedIndex: number
+}
+
 export interface PersistedState {
-  version: 1
+  version: 2
   savedAt: number
   sessions: PersistedSession[]
+  workspaces: PersistedWorkspace[]
 }
 
 /** 스크롤백을 상한까지 줄인다. 이스케이프 시퀀스 중간에서 자르면 화면이 깨지므로 개행에서 자른다. P16-5 */
@@ -79,8 +104,16 @@ export class SessionStore {
 
   private validate(value: unknown): PersistedState | null {
     if (typeof value !== 'object' || value === null) return null
-    const state = value as Partial<PersistedState>
-    if (state.version !== 1 || !Array.isArray(state.sessions)) return null
+    const state = value as {
+      version?: unknown
+      savedAt?: unknown
+      sessions?: unknown
+      workspaces?: unknown
+    }
+    // version 1은 pane 배치가 없던 시절의 파일이다. 세션만 살리고 배치는 비운다 —
+    // 호출자가 세션마다 pane 하나짜리 워크스페이스를 만들어 준다
+    if (state.version !== 1 && state.version !== 2) return null
+    if (!Array.isArray(state.sessions)) return null
 
     const sessions: PersistedSession[] = []
     for (const entry of state.sessions) {
@@ -95,10 +128,166 @@ export class SessionStore {
     }
 
     // 오래된 것부터 잘라 상한을 지킨다. P16-7
+    const kept = sessions.slice(-POLICY.MAX_SESSIONS)
+    const dropped = sessions.length - kept.length
+
+    const rawWorkspaces = Array.isArray(state.workspaces) ? state.workspaces : []
+    const workspaces: PersistedWorkspace[] = []
+    for (const entry of rawWorkspaces) {
+      const parsed = parseWorkspace(entry, kept.length, dropped)
+      if (parsed) workspaces.push(parsed)
+    }
+
     return {
-      version: 1,
+      version: 2,
       savedAt: typeof state.savedAt === 'number' ? state.savedAt : 0,
-      sessions: sessions.slice(-POLICY.MAX_SESSIONS)
+      sessions: kept,
+      workspaces
     }
   }
+}
+
+function parseWorkspace(value: unknown, count: number, dropped: number): PersistedWorkspace | null {
+  if (typeof value !== 'object' || value === null) return null
+  const ws = value as Partial<PersistedWorkspace>
+  const root = parsePane(ws.root, count, dropped)
+  if (!root) return null
+  const focused = typeof ws.focusedIndex === 'number' ? ws.focusedIndex - dropped : 0
+  return {
+    title: typeof ws.title === 'string' ? ws.title : null,
+    root,
+    focusedIndex: focused >= 0 && focused < count ? focused : 0
+  }
+}
+
+/** 순번이 범위를 벗어난 잎은 걷어낸다 — 상한에 걸려 잘려나간 세션을 가리킬 수 있다 */
+function parsePane(value: unknown, count: number, dropped: number): PersistedPane | null {
+  if (typeof value !== 'object' || value === null) return null
+  const node = value as Partial<PersistedPane> & { kind?: string }
+
+  if (node.kind === 'leaf') {
+    const raw = (node as { sessionIndex?: unknown }).sessionIndex
+    if (typeof raw !== 'number') return null
+    const index = raw - dropped
+    if (index < 0 || index >= count) return null
+    return { kind: 'leaf', sessionIndex: index }
+  }
+
+  if (node.kind === 'split') {
+    const split = node as Partial<Extract<PersistedPane, { kind: 'split' }>>
+    if (!Array.isArray(split.children)) return null
+    const direction = split.direction === 'column' ? 'column' : 'row'
+    const children: PersistedPane[] = []
+    const sizes: number[] = []
+    split.children.forEach((child, i) => {
+      const parsed = parsePane(child, count, dropped)
+      if (!parsed) return
+      children.push(parsed)
+      const size = Array.isArray(split.sizes) ? split.sizes[i] : undefined
+      sizes.push(typeof size === 'number' && size > 0 ? size : 1)
+    })
+    if (children.length === 0) return null
+    // 자식이 하나만 살아남으면 split은 껍데기다. P17-4
+    if (children.length === 1) return children[0]
+    const sum = sizes.reduce((a, b) => a + b, 0)
+    return { kind: 'split', direction, children, sizes: sizes.map((s) => s / sum) }
+  }
+
+  return null
+}
+
+/** 저장된 배치를 실제 세션 id에 붙여 되살린다. 세션이 없는 잎은 버린다 */
+export function workspacesFromPersisted(
+  persisted: PersistedWorkspace[],
+  sessionIds: Array<string | null>
+): Workspace[] {
+  const out: Workspace[] = []
+
+  for (const entry of persisted) {
+    const focusedSession = sessionIds[entry.focusedIndex] ?? null
+    let focusedPaneId: string | null = null
+
+    const build = (node: PersistedPane): PaneNode | null => {
+      if (node.kind === 'leaf') {
+        const sessionId = sessionIds[node.sessionIndex]
+        if (!sessionId) return null
+        const leaf: PaneNode = { kind: 'leaf', id: randomUUID(), sessionId }
+        if (sessionId === focusedSession && focusedPaneId === null) focusedPaneId = leaf.id
+        return leaf
+      }
+
+      const children: PaneNode[] = []
+      const sizes: number[] = []
+      node.children.forEach((child, i) => {
+        const built = build(child)
+        if (!built) return
+        children.push(built)
+        sizes.push(node.sizes[i] ?? 1)
+      })
+      if (children.length === 0) return null
+      if (children.length === 1) return children[0] // P17-4
+      const sum = sizes.reduce((a, b) => a + b, 0)
+      return {
+        kind: 'split',
+        id: randomUUID(),
+        direction: node.direction,
+        children,
+        sizes: sizes.map((s) => s / sum)
+      }
+    }
+
+    const root = build(entry.root)
+    if (!root) continue
+    out.push({
+      id: randomUUID(),
+      title: entry.title,
+      root,
+      focusedPaneId: focusedPaneId ?? firstLeafId(root)
+    })
+  }
+
+  return out
+}
+
+/** 렌더러가 준 배치를 순번 기반으로 바꿔 저장 가능한 형태로 만든다 */
+export function workspacesToPersisted(
+  workspaces: Workspace[],
+  sessionOrder: string[]
+): PersistedWorkspace[] {
+  const indexOf = new Map(sessionOrder.map((id, i) => [id, i]))
+  const out: PersistedWorkspace[] = []
+
+  for (const workspace of workspaces) {
+    let focusedIndex = 0
+
+    const convert = (node: PaneNode): PersistedPane | null => {
+      if (node.kind === 'leaf') {
+        const index = indexOf.get(node.sessionId)
+        if (index === undefined) return null
+        if (node.id === workspace.focusedPaneId) focusedIndex = index
+        return { kind: 'leaf', sessionIndex: index }
+      }
+      const children: PersistedPane[] = []
+      const sizes: number[] = []
+      node.children.forEach((child, i) => {
+        const converted = convert(child)
+        if (!converted) return
+        children.push(converted)
+        sizes.push(node.sizes[i] ?? 1)
+      })
+      if (children.length === 0) return null
+      if (children.length === 1) return children[0]
+      return { kind: 'split', direction: node.direction, children, sizes }
+    }
+
+    const root = convert(workspace.root)
+    if (!root) continue
+    out.push({ title: workspace.title, root, focusedIndex })
+  }
+
+  return out
+}
+
+function firstLeafId(node: PaneNode): string {
+  return node.kind === 'leaf' ? node.id : firstLeafId(node.children[0])
 }

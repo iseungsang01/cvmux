@@ -1,13 +1,14 @@
+import { writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 
 import { POLICY } from '@shared/policy'
-import { IPC } from '@shared/types'
+import { IPC, type Workspace } from '@shared/types'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty-manager'
-import { SessionStore } from './store'
+import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from './store'
 
 /**
  * 개발 중에는 앱을 띄운 디렉토리에서 첫 세션을 시작한다 — 터미널 앱의 관례이고,
@@ -32,10 +33,21 @@ let store: SessionStore | null = null
 let persistTimer: NodeJS.Timeout | null = null
 let persistDebounce: NodeJS.Timeout | null = null
 
-/** 지금 즉시 저장. P16-1 */
+/** 앱 시작 시 복원한 pane 배치. 렌더러가 한 번 가져간다 */
+let restoredLayout: Workspace[] = []
+/** 렌더러가 마지막으로 알려준 배치 — 저장 대상 */
+let currentLayout: Workspace[] = []
+
+/** 지금 즉시 저장. P16-1 / P17 */
 function persistNow(): void {
   if (!store) return
-  store.save({ version: 1, savedAt: Date.now(), sessions: manager.serialize() })
+  store.save({
+    version: 2,
+    savedAt: Date.now(),
+    sessions: manager.serialize(),
+    // 세션을 순번으로 가리키므로 serialize()와 같은 순서를 넘겨야 한다
+    workspaces: workspacesToPersisted(currentLayout, manager.sessionOrder())
+  })
 }
 
 /** 세션을 여러 개 연달아 만들 때 매번 쓰지 않도록 묶는다 */
@@ -96,6 +108,22 @@ function createWindow(): void {
   mainWindow = win
 
   win.once('ready-to-show', () => win.show())
+
+  /*
+   * 개발용 화면 캡처. CVMUX_CAPTURE에 파일 경로를 주면 창이 뜬 뒤 한 번 찍는다.
+   *
+   * Win32 PrintWindow로는 Chromium이 그린 내용을 잡지 못해 화면이 비어 보인다.
+   * capturePage는 렌더러가 실제로 그린 픽셀을 주므로 검증에 쓸 수 있다.
+   */
+  const capturePath = process.env.CVMUX_CAPTURE
+  if (capturePath) {
+    setTimeout(() => {
+      void win.webContents
+        .capturePage()
+        .then((image) => writeFileSync(capturePath, image.toPNG()))
+        .catch((error: unknown) => console.error('[cvmux] 캡처 실패:', error))
+    }, 9000)
+  }
 
   // 외부 링크는 기본 브라우저로. 앱 내 내비게이션은 차단한다. P9-4
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -170,7 +198,13 @@ if (!app.requestSingleInstanceLock()) {
     store = new SessionStore(join(app.getPath('userData'), 'sessions.json'))
     const saved = store.load()
 
-    registerIpc(manager, notifier)
+    registerIpc(manager, notifier, {
+      load: () => restoredLayout,
+      save: (workspaces) => {
+        currentLayout = workspaces
+        schedulePersist()
+      }
+    })
     createWindow()
 
     /*
@@ -178,8 +212,14 @@ if (!app.requestSingleInstanceLock()) {
      * 렌더러의 첫 list() 호출에는 이미 복원된 세션이 담긴다. P16
      */
     if (saved !== null && saved.sessions.length > 0) {
-      const restored = manager.restore(saved.sessions)
-      console.log(`[cvmux] 세션 ${restored}개를 복원했습니다`)
+      const ids = manager.restore(saved.sessions)
+      // 저장된 배치의 순번을 방금 발급된 세션 id에 붙인다. P17
+      restoredLayout = workspacesFromPersisted(saved.workspaces, ids)
+      currentLayout = restoredLayout
+      const count = ids.filter((id) => id !== null).length
+      console.log(
+        `[cvmux] 세션 ${count}개, 워크스페이스 ${restoredLayout.length}개를 복원했습니다`
+      )
     }
 
     // 주기 저장 + 세션이 생기거나 사라질 때 저장. P16-1

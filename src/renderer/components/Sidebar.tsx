@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 
-import type { SessionMeta } from '@shared/types'
+import type { SessionMeta, Workspace } from '@shared/types'
 import {
   exitLabel,
   gitTooltip,
@@ -9,9 +9,15 @@ import {
   splitPorts,
   statusLabel
 } from '../lib/format'
+import { paneCount } from '../lib/layout'
+import { representativeSession, workspaceTitle } from '../lib/workspace'
 
 /**
- * 왼쪽 사이드바 — 이 앱의 존재 이유 (P4 시각 표현).
+ * 왼쪽 사이드바 — 이 앱의 존재 이유 (P4 시각 표현 / P17-7).
+ *
+ * 한 줄이 워크스페이스 하나다. 워크스페이스 안에 pane이 여럿이면 그중 가장
+ * 손이 필요한 pane이 대표로 올라온다 — 실행 중인 pane 하나가 확인을 기다리는
+ * pane을 가려서는 안 되기 때문이다.
  *
  * 상태 → 표시:
  *   busy      초록 점(펄스)     출력이 흐르는 중
@@ -22,7 +28,8 @@ import {
  */
 
 interface SidebarProps {
-  sessions: SessionMeta[]
+  workspaces: Workspace[]
+  sessions: Map<string, SessionMeta>
   activeId: string | null
   error: string | null
   collapsed: boolean
@@ -33,6 +40,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  workspaces,
   sessions,
   activeId,
   error,
@@ -68,12 +76,13 @@ export function Sidebar({
       )}
 
       <ul className="session-list">
-        {sessions.map((session, index) => (
-          <SessionRow
-            key={session.id}
-            session={session}
+        {workspaces.map((workspace, index) => (
+          <WorkspaceRow
+            key={workspace.id}
+            workspace={workspace}
+            sessions={sessions}
             index={index}
-            active={session.id === activeId}
+            active={workspace.id === activeId}
             onSelect={onSelect}
             onClose={onClose}
           />
@@ -81,28 +90,35 @@ export function Sidebar({
       </ul>
 
       <footer className="sidebar-foot">
-        <span>{sessions.length}개 세션</span>
+        <span>{workspaces.length}개 세션</span>
         <kbd>Ctrl+Shift+B</kbd>
       </footer>
     </aside>
   )
 }
 
-interface SessionRowProps {
-  session: SessionMeta
+interface WorkspaceRowProps {
+  workspace: Workspace
+  sessions: Map<string, SessionMeta>
   index: number
   active: boolean
   onSelect(id: string): void
   onClose(id: string): void
 }
 
-function SessionRow({
-  session,
+function WorkspaceRow({
+  workspace,
+  sessions,
   index,
   active,
   onSelect,
   onClose
-}: SessionRowProps): JSX.Element {
+}: WorkspaceRowProps): JSX.Element | null {
+  // 대표 pane이 상태·미리보기·git·포트를 모두 대표한다. P17-7 / P17-8
+  const session = representativeSession(workspace, sessions)
+  if (!session) return null
+
+  const panes = paneCount(workspace.root)
   const needsAttention = session.status === 'attention' || session.status === 'waiting'
   const classes = [
     'session-row',
@@ -113,27 +129,30 @@ function SessionRow({
     .filter(Boolean)
     .join(' ')
 
+  const title = workspaceTitle(workspace, sessions)
+
   return (
     <li>
       <div
         className={classes}
         role="button"
         tabIndex={0}
-        onClick={() => onSelect(session.id)}
+        onClick={() => onSelect(workspace.id)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            onSelect(session.id)
+            onSelect(workspace.id)
           }
         }}
-        title={`${session.title}\n${session.cwd}\n${statusLabel(session)}`}
+        title={`${title}\n${session.cwd}\n${statusLabel(session)}${panes > 1 ? `\npane ${panes}개` : ''}`}
       >
         <StatusDot session={session} />
 
         <div className="session-body">
           <div className="session-title-line">
             {/* 제목이 길면 말줄임 — 전체는 툴팁으로. P5-7 */}
-            <span className="session-title">{session.title}</span>
+            <span className="session-title">{title}</span>
+            {panes > 1 && <span className="session-panes">⊞{panes}</span>}
             {index < 8 && <span className="session-index">{index + 1}</span>}
           </div>
 
@@ -146,7 +165,7 @@ function SessionRow({
               {exitLabel(session)} · Enter로 재시작
             </div>
           ) : (
-            <div className="session-preview">{session.preview || ' '}</div>
+            <div className="session-preview">{session.preview || ' '}</div>
           )}
 
           {/* 조치가 필요한 경고만 노출한다. P12-1 / P12-3 */}
@@ -156,11 +175,11 @@ function SessionRow({
         <button
           type="button"
           className="session-close"
-          title="세션 닫기 (Ctrl+Shift+W)"
+          title={panes > 1 ? `pane ${panes}개를 모두 닫습니다` : '세션 닫기 (Ctrl+Shift+W)'}
           aria-label="세션 닫기"
           onClick={(event) => {
             event.stopPropagation()
-            onClose(session.id)
+            onClose(workspace.id)
           }}
         >
           ×
@@ -180,13 +199,9 @@ function SessionFacts({ session }: { session: SessionMeta }): JSX.Element | null
   return (
     <div className="session-facts">
       {git && (
-        <span
-          className={`fact fact-git${git.dirty ? ' is-dirty' : ''}`}
-          title={gitTooltip(git)}
-        >
+        <span className={`fact fact-git${git.dirty ? ' is-dirty' : ''}`} title={gitTooltip(git)}>
           {/* 브랜치는 ⎇, detached HEAD는 커밋을 가리키므로 ◉ */}
           <span className="fact-icon">{git.detached ? '◉' : '⎇'}</span>
-          {/* 브랜치명이 길면 말줄임, 전체는 툴팁. P13-9 */}
           <span className="fact-branch">{git.branch}</span>
           {git.operation !== null && <span className="fact-op">{git.operation}</span>}
           {git.dirty && <span className="fact-dot" aria-label="변경사항 있음" />}

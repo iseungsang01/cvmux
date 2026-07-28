@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 
-import type { SessionMeta } from '@shared/types'
+import type { SessionMeta, Workspace } from '@shared/types'
+import { PaneTree } from './components/PaneTree'
 import { Sidebar } from './components/Sidebar'
-import { TerminalDeck } from './components/TerminalDeck'
+import {
+  closePane,
+  findLeafBySession,
+  firstLeafId,
+  findLeaf,
+  resizeSplit,
+  splitPane
+} from './lib/layout'
+import { focusedSessionId, makeWorkspace } from './lib/workspace'
 import { TerminalHost } from './terminal-host'
 
 /**
- * 앱 단축키 (P6-3).
+ * 앱 단축키 (P6-3 / P17-1).
  *
  * 셸이 실제로 쓰는 키는 절대 가로채지 않는다. Ctrl+C는 인터럽트(P6-1),
- * Ctrl+N/Ctrl+B/Ctrl+W는 PSReadLine과 bash가 쓰므로 전부 Shift/Alt를 얹었다.
+ * Ctrl+N/Ctrl+B/Ctrl+W/Ctrl+D는 PSReadLine과 bash가 쓰므로 전부 Shift를 얹었다.
  */
 type Shortcut =
   | { kind: 'new' }
   | { kind: 'close' }
   | { kind: 'sidebar' }
+  | { kind: 'split'; direction: 'row' | 'column' }
   | { kind: 'select'; index: number }
 
 function matchShortcut(event: KeyboardEvent): Shortcut | null {
@@ -30,6 +40,18 @@ function matchShortcut(event: KeyboardEvent): Shortcut | null {
         return null
     }
   }
+
+  // 분할은 Windows Terminal 관례를 따른다 — 이 앱을 쓸 사람이 이미 익힌 키다. P17-1
+  if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (event.code === 'Equal' || event.code === 'NumpadAdd') {
+      return { kind: 'split', direction: 'row' } // 오른쪽에 새 pane
+    }
+    if (event.code === 'Minus' || event.code === 'NumpadSubtract') {
+      return { kind: 'split', direction: 'column' } // 아래에 새 pane
+    }
+    return null
+  }
+
   if (event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey) {
     // e.key 대신 e.code — 키보드 레이아웃이 달라도 숫자열 위치는 같다
     const match = /^Digit([1-8])$/.exec(event.code)
@@ -40,17 +62,26 @@ function matchShortcut(event: KeyboardEvent): Shortcut | null {
 
 export function App(): JSX.Element {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 이벤트 핸들러가 오래된 클로저를 붙잡지 않도록 최신 값을 ref로 들고 다닌다
   const activeIdRef = useRef<string | null>(null)
+  const workspacesRef = useRef<Workspace[]>([])
   const sessionsRef = useRef<SessionMeta[]>([])
   const composingRef = useRef(false)
 
   activeIdRef.current = activeId
+  workspacesRef.current = workspaces
   sessionsRef.current = sessions
+
+  const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
+  const activeWorkspace = useMemo(
+    () => workspaces.find((w) => w.id === activeId) ?? null,
+    [workspaces, activeId]
+  )
 
   const host = useMemo(
     () =>
@@ -69,40 +100,102 @@ export function App(): JSX.Element {
     []
   )
 
-  const createSession = useCallback(async (): Promise<void> => {
-    // 새 세션은 활성 세션의 작업 디렉토리를 물려받는다. P11-1
-    const active = sessionsRef.current.find((s) => s.id === activeIdRef.current)
-    const result = await window.cvmux.create({ cwd: active?.cwd })
-    if (!result.ok) {
+  /** 지금 포커스된 pane의 세션 — cwd 상속과 알림 판단에 쓴다 */
+  const currentSession = useCallback((): SessionMeta | undefined => {
+    const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+    if (!workspace) return undefined
+    const sessionId = focusedSessionId(workspace)
+    if (sessionId === null) return undefined
+    return sessionsRef.current.find((s) => s.id === sessionId)
+  }, [])
+
+  const createWorkspace = useCallback(async (): Promise<void> => {
+    // 새 워크스페이스는 지금 보고 있던 작업 디렉토리를 물려받는다. P11-1
+    const result = await window.cvmux.create({ cwd: currentSession()?.cwd })
+    if (!result.ok || !result.session) {
       // 상한 초과 같은 실패는 사유를 그대로 보여준다. P1-8 / P12-1
       setError(result.error ?? '세션을 만들지 못했습니다.')
       return
     }
     setError(null)
-    if (result.session) setActiveId(result.session.id)
+    const workspace = makeWorkspace(result.session.id)
+    setWorkspaces((prev) => [...prev, workspace])
+    setActiveId(workspace.id)
+  }, [currentSession])
+
+  /** 포커스된 pane을 둘로 나눈다. P17-1 / P17-2 */
+  const splitFocused = useCallback(
+    async (direction: 'row' | 'column'): Promise<void> => {
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) return
+
+      // 새 pane은 나눈 pane의 작업 디렉토리에서 시작한다. P17-2
+      const result = await window.cvmux.create({ cwd: currentSession()?.cwd })
+      if (!result.ok || !result.session) {
+        setError(result.error ?? '세션을 만들지 못했습니다.')
+        return
+      }
+      setError(null)
+
+      const sessionId = result.session.id
+      const split = splitPane(workspace.root, workspace.focusedPaneId, direction, sessionId)
+      if (!split) {
+        // 나눌 자리를 잃었다 — 방금 만든 세션을 되돌린다
+        void window.cvmux.close(sessionId)
+        return
+      }
+
+      setWorkspaces((prev) =>
+        prev.map((w) =>
+          w.id === workspace.id ? { ...w, root: split.root, focusedPaneId: split.newPaneId } : w
+        )
+      )
+    },
+    [currentSession]
+  )
+
+  /** 포커스된 pane을 닫는다. 세션을 끝내면 onClosed가 트리를 정리한다. P17-3 */
+  const closeFocusedPane = useCallback((): void => {
+    const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+    if (!workspace) return
+    const sessionId = focusedSessionId(workspace)
+    if (sessionId !== null) void window.cvmux.close(sessionId)
   }, [])
 
-  const closeSession = useCallback((id: string): void => {
-    void window.cvmux.close(id)
+  const closeWorkspace = useCallback((workspaceId: string): void => {
+    const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+    if (!workspace) return
+    // 워크스페이스를 닫으면 그 안의 pane 전부를 끝낸다
+    for (const leaf of paneSessionIds(workspace)) void window.cvmux.close(leaf)
   }, [])
 
   // ── 초기 로드 ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const list = await window.cvmux.list()
+      const [list, layout] = await Promise.all([window.cvmux.list(), window.cvmux.loadLayout()])
       if (cancelled) return
       setSessions(list)
-      if (list.length > 0) {
-        setActiveId(list[0].id)
+
+      // 저장된 레이아웃이 있으면 그대로, 없으면 세션마다 pane 하나짜리 워크스페이스. P17
+      const restored = layout.filter((w) =>
+        paneSessionIds(w).every((id) => list.some((s) => s.id === id))
+      )
+      const covered = new Set(restored.flatMap(paneSessionIds))
+      const leftovers = list.filter((s) => !covered.has(s.id)).map((s) => makeWorkspace(s.id))
+      const all = [...restored, ...leftovers]
+
+      if (all.length > 0) {
+        setWorkspaces(all)
+        setActiveId(all[0].id)
       } else {
-        await createSession()
+        await createWorkspace()
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [createSession])
+  }, [createWorkspace])
 
   // ── main 이벤트 구독 ─────────────────────────────────────────
   useEffect(() => {
@@ -112,8 +205,9 @@ export function App(): JSX.Element {
 
     const offMeta = window.cvmux.onMeta((meta) => {
       host.setStatus(meta.id, meta.status)
-      // 사용자가 보고 있는 세션의 알림은 미읽음으로 쌓지 않는다. P4-4
-      if (meta.unread && meta.id === activeIdRef.current) {
+      // 사용자가 보고 있는 pane의 알림은 미읽음으로 쌓지 않는다. P4-4
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (meta.unread && workspace && focusedSessionId(workspace) === meta.id) {
         void window.cvmux.markRead(meta.id)
       }
       setSessions((prev) => prev.map((s) => (s.id === meta.id ? meta : s)))
@@ -126,14 +220,42 @@ export function App(): JSX.Element {
     const offClosed = window.cvmux.onClosed((id) => {
       host.dispose(id)
       setSessions((prev) => prev.filter((s) => s.id !== id))
+      // 세션이 끝나면 그 pane을 트리에서 걷어낸다. 마지막 pane이었다면
+      // 워크스페이스 자체가 사라진다. P17-3 / P17-4
+      setWorkspaces((prev) =>
+        prev.flatMap((workspace) => {
+          const leaf = findLeafBySession(workspace.root, id)
+          if (!leaf) return [workspace]
+          const next = closePane(workspace.root, leaf.id)
+          if (next === null) return []
+          const stillThere = findLeaf(next, workspace.focusedPaneId) !== null
+          return [
+            {
+              ...workspace,
+              root: next,
+              focusedPaneId: stillThere ? workspace.focusedPaneId : firstLeafId(next)
+            }
+          ]
+        })
+      )
     })
 
     // 종료 자체는 meta 이벤트로도 전달된다. 여기서는 별도 처리가 없다. P1-1
     const offExit = window.cvmux.onExit(() => {})
 
-    // 토스트를 클릭했다 — 해당 세션으로 전환한다. P15-5
-    const offActivate = window.cvmux.onActivate((id) => {
-      if (sessionsRef.current.some((s) => s.id === id)) setActiveId(id)
+    // 토스트를 클릭했다 — 그 세션이 있는 워크스페이스로 이동한다. P15-5
+    const offActivate = window.cvmux.onActivate((sessionId) => {
+      const workspace = workspacesRef.current.find(
+        (w) => findLeafBySession(w.root, sessionId) !== null
+      )
+      if (!workspace) return
+      const leaf = findLeafBySession(workspace.root, sessionId)
+      setActiveId(workspace.id)
+      if (leaf) {
+        setWorkspaces((prev) =>
+          prev.map((w) => (w.id === workspace.id ? { ...w, focusedPaneId: leaf.id } : w))
+        )
+      }
     })
 
     return () => {
@@ -149,21 +271,27 @@ export function App(): JSX.Element {
   // 창이 닫힐 때 xterm 인스턴스를 정리한다
   useEffect(() => () => host.disposeAll(), [host])
 
-  // ── 활성 세션 유지 ───────────────────────────────────────────
+  // 레이아웃이 바뀔 때마다 main에 넘겨 저장하게 한다. P16 / P17
   useEffect(() => {
-    if (activeId !== null && sessions.some((s) => s.id === activeId)) return
-    // 마지막 세션을 닫아도 앱은 살아있고, 빈 상태 화면을 보여준다. P1-7
-    setActiveId(sessions[0]?.id ?? null)
-  }, [sessions, activeId])
+    if (workspaces.length === 0) return
+    void window.cvmux.saveLayout(workspaces)
+  }, [workspaces])
 
+  // ── 활성 워크스페이스 유지 ───────────────────────────────────
   useEffect(() => {
-    // 보고 있는 세션을 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2
-    void window.cvmux.setActive(activeId)
-    if (activeId === null) return
-    // 세션을 열어 봤으므로 미읽음을 해제한다. P4-5
-    void window.cvmux.markRead(activeId)
-    host.focus(activeId)
-  }, [activeId, host])
+    if (activeId !== null && workspaces.some((w) => w.id === activeId)) return
+    // 마지막 워크스페이스를 닫아도 앱은 살아있고, 빈 상태 화면을 보여준다. P1-7
+    setActiveId(workspaces[0]?.id ?? null)
+  }, [workspaces, activeId])
+
+  // 포커스된 pane이 바뀌면 main에 알리고(P15-2) 미읽음을 해제한다(P4-5)
+  const focusedId = activeWorkspace ? focusedSessionId(activeWorkspace) : null
+  useEffect(() => {
+    void window.cvmux.setActive(focusedId)
+    if (focusedId === null) return
+    void window.cvmux.markRead(focusedId)
+    host.focus(focusedId)
+  }, [focusedId, host])
 
   // ── 단축키 ───────────────────────────────────────────────────
   useEffect(() => {
@@ -186,18 +314,19 @@ export function App(): JSX.Element {
 
       switch (shortcut.kind) {
         case 'new':
-          void createSession()
+          void createWorkspace()
           break
-        case 'close': {
-          const id = activeIdRef.current
-          if (id !== null) closeSession(id)
+        case 'close':
+          closeFocusedPane()
           break
-        }
         case 'sidebar':
           setSidebarCollapsed((v) => !v)
           break
+        case 'split':
+          void splitFocused(shortcut.direction)
+          break
         case 'select': {
-          const target = sessionsRef.current[shortcut.index]
+          const target = workspacesRef.current[shortcut.index]
           if (target) setActiveId(target.id)
           break
         }
@@ -213,12 +342,14 @@ export function App(): JSX.Element {
       window.removeEventListener('compositionstart', onCompositionStart, true)
       window.removeEventListener('compositionend', onCompositionEnd, true)
     }
-  }, [closeSession, createSession])
+  }, [closeFocusedPane, createWorkspace, splitFocused])
 
   // 사이드바 애니메이션이 끝난 뒤에 크기를 다시 맞춘다. P5-5
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (activeIdRef.current !== null) host.refit(activeIdRef.current)
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) return
+      for (const sessionId of paneSessionIds(workspace)) host.refit(sessionId)
     }, 220)
     return () => window.clearTimeout(timer)
   }, [sidebarCollapsed, host])
@@ -226,11 +357,32 @@ export function App(): JSX.Element {
   // 최소화 → 복원, 다른 앱에서 돌아왔을 때 크기를 다시 맞춘다. P5-6
   useEffect(() => {
     const onFocus = (): void => {
-      if (activeIdRef.current !== null) host.refit(activeIdRef.current)
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) return
+      for (const sessionId of paneSessionIds(workspace)) host.refit(sessionId)
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [host])
+
+  const handleFocusPane = useCallback((paneId: string): void => {
+    setWorkspaces((prev) =>
+      prev.map((w) => (w.id === activeIdRef.current ? { ...w, focusedPaneId: paneId } : w))
+    )
+  }, [])
+
+  const handleResize = useCallback(
+    (splitId: string, dividerIndex: number, delta: number, minRatio: number): void => {
+      setWorkspaces((prev) =>
+        prev.map((w) =>
+          w.id === activeIdRef.current
+            ? { ...w, root: resizeSplit(w.root, splitId, dividerIndex, delta, minRatio) }
+            : w
+        )
+      )
+    },
+    []
+  )
 
   return (
     <div className={`app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
@@ -245,38 +397,69 @@ export function App(): JSX.Element {
           ☰
         </button>
         <span className="titlebar-title">
-          {sessions.find((s) => s.id === activeId)?.title ?? 'cvmux'}
+          {focusedId !== null ? (sessionMap.get(focusedId)?.title ?? 'cvmux') : 'cvmux'}
         </span>
       </div>
 
       <div className="body">
         <Sidebar
-          sessions={sessions}
+          workspaces={workspaces}
+          sessions={sessionMap}
           activeId={activeId}
           error={error}
           collapsed={sidebarCollapsed}
           onSelect={setActiveId}
-          onClose={closeSession}
-          onCreate={() => void createSession()}
+          onClose={closeWorkspace}
+          onCreate={() => void createWorkspace()}
           onDismissError={() => setError(null)}
         />
 
         <main className="main">
-          {sessions.length === 0 ? (
+          {workspaces.length === 0 ? (
             <div className="empty">
               <h1>열린 세션이 없습니다</h1>
               <p>
                 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> 으로 새 세션을 시작하세요
               </p>
-              <button type="button" className="primary-button" onClick={() => void createSession()}>
+              <button type="button" className="primary-button" onClick={() => void createWorkspace()}>
                 새 세션
               </button>
             </div>
           ) : (
-            <TerminalDeck host={host} sessions={sessions} activeId={activeId} />
+            <div className="deck">
+              {workspaces.map((workspace) => (
+                <div
+                  key={workspace.id}
+                  className={`workspace${workspace.id === activeId ? ' is-active' : ''}`}
+                >
+                  <PaneTree
+                    node={workspace.root}
+                    sessions={sessionMap}
+                    host={host}
+                    focusedPaneId={workspace.focusedPaneId}
+                    visible={workspace.id === activeId}
+                    onFocusPane={handleFocusPane}
+                    onResize={handleResize}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </main>
       </div>
     </div>
   )
+}
+
+function paneSessionIds(workspace: Workspace): string[] {
+  const out: string[] = []
+  const walk = (node: Workspace['root']): void => {
+    if (node.kind === 'leaf') {
+      out.push(node.sessionId)
+      return
+    }
+    node.children.forEach(walk)
+  }
+  walk(workspace.root)
+  return out
 }

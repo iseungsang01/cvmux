@@ -7,7 +7,8 @@ import {
   type CvmuxApi,
   type SessionExitInfo,
   type SessionMeta,
-  type SessionSnapshot
+  type SessionSnapshot,
+  type Workspace
 } from '@shared/types'
 
 /**
@@ -43,6 +44,8 @@ const api: CvmuxApi = {
   markRead: (id) => ipcRenderer.invoke(IPC.MARK_READ, id) as Promise<boolean>,
   confirmPaste: (bytes) => ipcRenderer.invoke(IPC.CONFIRM_PASTE, bytes) as Promise<boolean>,
   setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
+  loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<Workspace[]>,
+  saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
 
   onData: (cb) => subscribe<[string, string]>(IPC.EVT_DATA, cb),
   onMeta: (cb) => subscribe<[SessionMeta]>(IPC.EVT_META, cb),

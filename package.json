@@ -11,7 +11,9 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "esbuild tests/session-state.test.ts --bundle --platform=node --format=esm --outfile=out/tests/session-state.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/session-state.mjs"
+    "test": "npm run test:state && npm run test:layout",
+    "test:state": "esbuild tests/session-state.test.ts --bundle --platform=node --format=esm --outfile=out/tests/session-state.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/session-state.mjs",
+    "test:layout": "esbuild tests/layout.test.ts --bundle --platform=node --format=esm --outfile=out/tests/layout.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/layout.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

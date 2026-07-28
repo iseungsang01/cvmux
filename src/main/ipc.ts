@@ -1,9 +1,15 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 
 import { POLICY } from '@shared/policy'
-import { IPC, type CreateSessionOptions } from '@shared/types'
+import { IPC, type CreateSessionOptions, type Workspace } from '@shared/types'
 import type { Notifier } from './notifier'
 import type { PtyManager } from './pty-manager'
+
+/** 레이아웃은 렌더러가 소유하고 main은 저장만 한다. P17 */
+export interface LayoutBridge {
+  load(): Workspace[]
+  save(workspaces: Workspace[]): void
+}
 
 /**
  * IPC 배선 (P9).
@@ -11,7 +17,7 @@ import type { PtyManager } from './pty-manager'
  * 모든 핸들러는 예외를 던지지 않는다. 알 수 없는 세션 id, 죽은 PTY, 잘못된
  * 인자는 모두 `false`/`null`로 응답한다 — 렌더러를 죽이는 것보다 낫다(P1-9).
  */
-export function registerIpc(manager: PtyManager, notifier: Notifier): void {
+export function registerIpc(manager: PtyManager, notifier: Notifier, layout: LayoutBridge): void {
   /** 사용자가 지금 보고 있는 세션. 토스트를 띄울지 판단에 쓴다. P15-2 */
   let activeSessionId: string | null = null
 
@@ -48,6 +54,14 @@ export function registerIpc(manager: PtyManager, notifier: Notifier): void {
 
   ipcMain.handle(IPC.SET_ACTIVE, (_event, id: unknown) => {
     activeSessionId = typeof id === 'string' ? id : null
+    return true
+  })
+
+  ipcMain.handle(IPC.LOAD_LAYOUT, () => layout.load())
+
+  ipcMain.handle(IPC.SAVE_LAYOUT, (_event, workspaces: unknown) => {
+    if (!Array.isArray(workspaces)) return false
+    layout.save(workspaces as Workspace[])
     return true
   })
 

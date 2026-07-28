@@ -573,21 +573,28 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   /**
    * 저장된 세션을 되살린다. 프로세스가 아니라 자리(작업 디렉토리)와 화면을 복원한다.
-   * @returns 실제로 복원된 개수
+   *
+   * @returns 입력과 같은 길이의 배열. 각 자리에 새 세션 id, 복원하지 못했으면 null.
+   *          저장된 pane 배치가 세션을 **순번**으로 가리키므로 자리를 맞춰 돌려준다.
    */
-  restore(sessions: PersistedSession[]): number {
-    let restored = 0
-    for (const item of sessions) {
+  restore(sessions: PersistedSession[]): Array<string | null> {
+    return sessions.map((item) => {
       // 상한을 넘으면 조용히 멈춘다. P16-7
-      if (this.sessions.size >= POLICY.MAX_SESSIONS) break
+      if (this.sessions.size >= POLICY.MAX_SESSIONS) return null
       // 사라진 디렉토리는 resolveCwd가 폴백하고 경고를 남긴다. P16-4
       const result = this.spawn(
         { cwd: item.cwd, title: item.title ?? undefined },
         item.scrollback || null
       )
-      if (result.ok) restored++
-    }
-    return restored
+      return result.ok && result.session ? result.session.id : null
+    })
+  }
+
+  /** 저장할 때 pane 배치가 참조할 세션 순서 */
+  sessionOrder(): string[] {
+    return [...this.sessions.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((s) => s.id)
   }
 
   /** 알 수 없는 세션 id는 조용히 false — 예외로 렌더러를 죽이지 않는다. P1-9 */

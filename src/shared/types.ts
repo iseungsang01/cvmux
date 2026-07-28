@@ -58,6 +58,33 @@ export interface SessionMeta {
   createdAt: number
 }
 
+/**
+ * 워크스페이스 안의 pane 배치 (P17).
+ *
+ * 잎(leaf)이 터미널 하나, 가지(split)가 나눔이다. 분할하지 않으면 root가 곧
+ * 잎 하나이므로, 분할을 쓰지 않는 사용자에게는 이 구조가 보이지 않는다.
+ */
+export type PaneNode =
+  | { kind: 'leaf'; id: string; sessionId: string }
+  | {
+      kind: 'split'
+      id: string
+      /** row = 좌우로 나란히, column = 위아래로 쌓임 (CSS flex-direction과 같다) */
+      direction: 'row' | 'column'
+      children: PaneNode[]
+      /** 각 자식의 비율. 합은 항상 1 */
+      sizes: number[]
+    }
+
+export interface Workspace {
+  id: string
+  /** 사용자가 지은 이름. null이면 대표 pane의 세션 제목을 쓴다 */
+  title: string | null
+  root: PaneNode
+  /** 마지막으로 포커스된 잎. 워크스페이스로 돌아올 때 이 pane으로 복귀한다. P17-9 */
+  focusedPaneId: string
+}
+
 export interface CreateSessionOptions {
   cwd?: string
   shell?: string
@@ -100,6 +127,9 @@ export const IPC = {
   CONFIRM_PASTE: 'app:confirm-paste',
   /** 어떤 세션을 보고 있는지 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2 */
   SET_ACTIVE: 'app:set-active',
+  /** pane 배치 저장/복원. P16 / P17 */
+  LOAD_LAYOUT: 'layout:load',
+  SAVE_LAYOUT: 'layout:save',
 
   // main → renderer (send)
   EVT_DATA: 'evt:session-data',
@@ -124,6 +154,9 @@ export interface CvmuxApi {
   markRead(id: string): Promise<boolean>
   confirmPaste(bytes: number): Promise<boolean>
   setActive(id: string | null): Promise<boolean>
+  /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
+  loadLayout(): Promise<Workspace[]>
+  saveLayout(workspaces: Workspace[]): Promise<boolean>
 
   onData(cb: (id: string, chunk: string) => void): () => void
   onMeta(cb: (meta: SessionMeta) => void): () => void
