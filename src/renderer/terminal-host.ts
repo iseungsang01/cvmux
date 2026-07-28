@@ -4,7 +4,12 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 
 import { POLICY } from '@shared/policy'
-import type { SessionStatus } from '@shared/types'
+import type { ClipboardContent, SessionStatus } from '@shared/types'
+
+/** Ctrl+V / Ctrl+Shift+V — 이 플랫폼에서 붙여넣기를 뜻하는 조합. P7-4 */
+function isPasteChord(event: KeyboardEvent): boolean {
+  return event.ctrlKey && !event.altKey && !event.metaKey && event.code === 'KeyV'
+}
 
 /**
  * xterm 인스턴스의 수명을 React 바깥에서 관리한다 (P5-1).
@@ -227,6 +232,19 @@ export class TerminalHost {
       // 앱 단축키는 셸로 내려보내지 않는다. Ctrl+C 같은 셸 키는 여기 걸리지 않는다. P6-1 / P6-3
       if (this.callbacks.isAppShortcut(event)) return false
 
+      /*
+       * 붙여넣기는 우리가 처리한다 (P7-4).
+       *
+       * `preventDefault`가 반드시 필요하다. 핸들러가 `false`를 돌려주는 것은
+       * xterm에게 "이 키는 네 몫이 아니다"라고 말할 뿐, 브라우저의 기본
+       * 붙여넣기까지 막지는 못한다. 빼먹으면 같은 내용이 두 번 들어간다.
+       */
+      if (isPasteChord(event)) {
+        event.preventDefault()
+        void this.pasteFromClipboard(entry)
+        return false
+      }
+
       if (entry.status === 'exited') {
         if (event.key === 'Enter') this.callbacks.onRestartRequest(id)
         return false // 종료된 세션에서 나머지 키는 무시. P6-6
@@ -251,6 +269,47 @@ export class TerminalHost {
     } catch {
       entry.webgl = null
     }
+  }
+
+  /**
+   * 붙여넣기 (P7-4 / P7-5).
+   *
+   * xterm은 Windows에서 `Ctrl+V`를 붙여넣기로 보지 않는다 — `Ctrl`+글자를
+   * 제어문자로 바꾸는 규칙을 따라 `0x16`을 셸로 흘려보낸다. 그래서 이 조합을
+   * 가로채 클립보드를 직접 읽는다. Windows Terminal과 같은 손버릇을 지키기
+   * 위함이다(P6-1의 "터미널이 우선"은 셸이 실제로 쓰는 키에 대한 이야기이고,
+   * `Ctrl+V`는 이 플랫폼에서 붙여넣기다).
+   */
+  private async pasteFromClipboard(entry: Entry): Promise<void> {
+    // 죽은 세션에는 아무것도 보내지 않는다. P6-6
+    if (entry.status === 'exited') return
+
+    let content: ClipboardContent
+    try {
+      content = await window.cvmux.readClipboard()
+    } catch {
+      return
+    }
+
+    if (!content.text) {
+      /*
+       * 텍스트가 없는 클립보드 — 이미지만 들어 있는 경우다 (P7-5).
+       *
+       * 터미널은 이미지를 실어 나를 수 없다. 대신 `Ctrl+V`를 원래 모습(0x16)
+       * 그대로 흘려보내, 안에서 도는 프로그램이 스스로 클립보드를 읽게 한다.
+       * Claude Code 같은 에이전트 CLI가 스크린샷을 첨부하는 길이 이것이다.
+       */
+      this.callbacks.onInput(entry.id, '\x16')
+      return
+    }
+
+    const bytes = new Blob([content.text]).size
+    if (bytes >= POLICY.PASTE_CONFIRM_BYTES) {
+      const ok = await window.cvmux.confirmPaste(bytes) // P7-3
+      if (!ok) return
+    }
+    // bracketed paste와 개행 정규화는 xterm이 맡는다. P7-1 / P7-2
+    entry.term.paste(content.text)
   }
 
   /** 대용량 붙여넣기만 가로챈다. 그 아래 크기는 xterm이 bracketed paste·CRLF까지 알아서 처리한다. P7 */

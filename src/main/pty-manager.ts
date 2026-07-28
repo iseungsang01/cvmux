@@ -32,10 +32,57 @@ function psBootstrap(keepScreen: boolean): string {
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)'
   ]
+  if (process.env.CVMUX_NO_SHELL_INTEGRATION !== '1') parts.push(SHELL_INTEGRATION)
   // 복원된 세션에서는 화면을 지우지 않는다 — 지우면 복원한 스크롤백이 날아간다. P16-6
   if (!keepScreen) parts.push('Clear-Host')
-  return parts.join('; ')
+  return parts.join('\n')
 }
+
+/**
+ * 셸 통합 심기 (P3-9).
+ *
+ * PowerShell은 기본적으로 작업 디렉토리(OSC 7)도 프롬프트 경계(OSC 133)도
+ * 알려주지 않는다. 그래서 사용자가 `cd`로 옮겨 다녀도 cvmux는 세션이 시작한
+ * 자리에 머물러 있다고 믿는다 — 사이드바의 경로와 git 정보가 전부 홈으로
+ * 굳어버리는 원인이다.
+ *
+ * 프로필이 정의한 prompt를 **감싸는** 방식이라 oh-my-posh 같은 테마를 깨뜨리지
+ * 않는다. 프로필 파일도 건드리지 않는다 — 이 세션 안에서만 유효하다(P3-3과 같은 원칙).
+ *
+ * 원본 prompt를 가장 먼저 호출하는 순서가 중요하다. 우리 코드가 앞서면 `$?`와
+ * `$LASTEXITCODE`가 우리 것으로 덮여, 직전 명령의 실패를 색으로 알려주는
+ * 테마들이 전부 성공한 것처럼 보이게 된다.
+ *
+ * 이스케이프 시퀀스를 prompt의 **반환 문자열**에 담는 것도 의도적이다. PSReadLine은
+ * 프롬프트를 그린 뒤 커서 위치로 폭을 재므로, 폭이 0인 OSC는 계산을 어긋내지
+ * 않는다 — VS Code와 Windows Terminal이 쓰는 방식이다.
+ */
+const SHELL_INTEGRATION = `
+if (-not $global:__cvmuxShellIntegration) {
+  $global:__cvmuxShellIntegration = $true
+  $global:__cvmuxPrompt = $function:prompt
+  function global:prompt {
+    $body = (& $global:__cvmuxPrompt) -join ''
+    $e = [char]27
+    $b = [char]7
+    $cwd = ''
+    $loc = $ExecutionContext.SessionState.Path.CurrentLocation
+    if ($loc.Provider.Name -eq 'FileSystem') {
+      $p = $loc.ProviderPath -replace '\\\\', '/' -replace '#', '%23' -replace '\\?', '%3F'
+      $cwd = "$e]7;file:///$p$b"
+    }
+    "$e]133;D$b$e]133;A$b$cwd$body$e]133;B$b"
+  }
+  if (Test-Path Function:\\PSConsoleHostReadLine) {
+    $global:__cvmuxReadLine = $function:PSConsoleHostReadLine
+    function global:PSConsoleHostReadLine {
+      $line = & $global:__cvmuxReadLine
+      [Console]::Write("$([char]27)]133;C$([char]7)")
+      $line
+    }
+  }
+}
+`.trim()
 
 /**
  * 셸과 ConPTY가 시작하면서 보내는 화면 지우기(ED)를 걷어낸다 (P16-6).

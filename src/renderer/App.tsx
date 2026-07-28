@@ -371,6 +371,17 @@ export function App(): JSX.Element {
     )
   }, [])
 
+  /**
+   * 사용자가 지은 이름 (P19-3).
+   *
+   * 워크스페이스에 붙인다 — 사이드바 한 줄이 곧 워크스페이스이고, 세션이 아니라
+   * 이 줄에 이름을 다는 것이 사용자가 보는 그림과 맞는다. 배치가 바뀌면 저장이
+   * 따라오므로(P17) 다시 켜도 이름이 남는다.
+   */
+  const renameWorkspace = useCallback((workspaceId: string, title: string | null): void => {
+    setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? { ...w, title } : w)))
+  }, [])
+
   const handleResize = useCallback(
     (splitId: string, dividerIndex: number, delta: number, minRatio: number): void => {
       setWorkspaces((prev) =>
@@ -412,6 +423,7 @@ export function App(): JSX.Element {
           onClose={closeWorkspace}
           onCreate={() => void createWorkspace()}
           onDismissError={() => setError(null)}
+          onRename={renameWorkspace}
         />
 
         <main className="main">

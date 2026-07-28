@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 
 import { POLICY } from '@shared/policy'
 import { IPC, type CreateSessionOptions, type Workspace } from '@shared/types'
@@ -110,6 +110,19 @@ export function registerIpc(manager: PtyManager, notifier: Notifier, layout: Lay
   ipcMain.handle(IPC.MARK_READ, (_event, id: unknown) =>
     typeof id === 'string' ? manager.markRead(id) : false
   )
+
+  /*
+   * 클립보드 조회 (P7-4).
+   *
+   * 렌더러는 샌드박스 안이라 클립보드를 직접 읽지 못한다. 붙여넣기를 xterm의
+   * 기본 동작에 맡기지 않고 여기까지 오는 이유는 P7-5에 있다 — 텍스트가 없는
+   * 클립보드를 구분해야 하기 때문이다.
+   */
+  ipcMain.handle(IPC.READ_CLIPBOARD, () => {
+    const text = clipboard.readText()
+    // 이미지 여부는 텍스트가 없을 때만 따진다. readImage는 싸지 않다
+    return { text, hasImage: text ? false : !clipboard.readImage().isEmpty() }
+  })
 
   // 대용량 붙여넣기 확인. P7-3
   ipcMain.handle(IPC.CONFIRM_PASTE, async (event, bytes: unknown) => {

@@ -212,27 +212,36 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.session-cwd,
-.session-preview,
-.session-exit,
+.session-where,
+.session-status,
 .session-warning {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-cwd {
+/* 어디인가 — 저장소 이름, 저장소가 아니면 축약 경로. P19-1 */
+.session-where {
   margin-top: 1px;
   color: var(--text-faint);
   font-size: 11px;
 }
 
-.session-preview {
-  margin-top: 4px;
-  min-height: 15px;
-  color: var(--text-dim);
-  font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 11px;
+/* 사용자가 이름을 고쳐 쓰는 중. 자리를 흔들지 않도록 제목과 같은 크기로 둔다. P19-3 */
+.session-title-input {
+  min-width: 0;
+  flex: 1;
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+
+.session-title-input:focus {
+  outline: none;
 }
 
 /* git 브랜치 + 리슨 포트 줄 */
@@ -308,13 +317,29 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.session-exit {
+/*
+ * 지금 어떤가 (P19-2).
+ *
+ * 마지막 출력 줄을 흘려보내던 자리다. 에이전트 CLI 안에서는 사용자가 치는
+ * 글자가 그대로 새어 나왔고, 그건 상태가 아니라 소음이었다. 이제 판정된
+ * 상태만 적는다 — 색은 왼쪽 점과 같은 언어를 쓴다.
+ */
+.session-status {
   margin-top: 4px;
   color: var(--text-dim);
   font-size: 11px;
 }
 
-.session-exit.is-failed {
+.session-status.is-busy {
+  color: var(--busy);
+}
+
+.session-status.is-attention,
+.session-status.is-waiting {
+  color: var(--accent);
+}
+
+.session-status.is-failed {
   color: var(--danger);
 }
 
@@ -492,7 +517,18 @@ kbd {
  * 비활성 워크스페이스도 DOM에 남긴다 — display:none이면 크기가 0이 되어
  * 전환할 때마다 터미널이 재랩된다. visibility로만 감춘다. P5-1 / P2-3
  */
+/*
+ * 워크스페이스는 남은 영역을 그대로 채운다 (P5-9).
+ *
+ * flex 컨테이너인 것이 중요하다. block이면 자식 `.pane`의 `flex: 1`이 무시돼
+ * 높이가 내용에 맡겨지고, `.pane-terminal`의 `height: 100%`도 기준을 잃는다.
+ * 그러면 fit이 재는 높이가 곧 터미널이 만들어 낸 높이가 되어, 처음 열린
+ * 24행에서 영영 자라지 못한다 — 창을 키워도 아래쪽이 빈 채로 남는다.
+ * 분할한 워크스페이스만 멀쩡했던 이유는 `.split`이 height를 직접 들고
+ * 있었기 때문이다.
+ */
 .workspace {
+  display: flex;
   position: absolute;
   inset: 0;
   z-index: 0;

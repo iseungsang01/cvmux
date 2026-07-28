@@ -115,6 +115,7 @@ export function gitInfoEqual(a: GitInfo | null, b: GitInfo | null): boolean {
   if (a === b) return true
   if (!a || !b) return false
   return (
+    a.repo === b.repo &&
     a.branch === b.branch &&
     a.detached === b.detached &&
     a.dirty === b.dirty &&

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { POLICY } from '@shared/policy'
 import type { GitInfo } from '@shared/types'
@@ -47,11 +47,18 @@ function detectOperation(gitDir: string): string | null {
   return null
 }
 
+/** 저장소의 두 축 — 메타데이터가 있는 곳과 작업 트리의 뿌리 */
+interface RepoPaths {
+  gitDir: string
+  /** 작업 트리 루트. bare 저장소에는 없다 */
+  root: string | null
+}
+
 export class GitProbe {
   /** git이 아예 없는 환경에서 매번 실패하지 않도록 한 번만 판정한다. P13-2 */
   private available = true
-  /** cwd → git 디렉토리 절대경로. null은 "저장소가 아님"을 캐시한 것. P13-1 */
-  private readonly gitDirCache = new Map<string, string | null>()
+  /** cwd → 저장소 경로. null은 "저장소가 아님"을 캐시한 것. P13-1 */
+  private readonly repoCache = new Map<string, RepoPaths | null>()
   /** 세션별 진행 중인 조사 — 겹치면 건너뛴다. P13-6 */
   private readonly inFlight = new Set<string>()
 
@@ -61,7 +68,7 @@ export class GitProbe {
 
   /** cwd가 바뀌면 그 경로의 판정을 버린다. P13-7 */
   forget(cwd: string): void {
-    this.gitDirCache.delete(cwd)
+    this.repoCache.delete(cwd)
   }
 
   /**
@@ -79,34 +86,50 @@ export class GitProbe {
   }
 
   private async doProbe(cwd: string): Promise<GitInfo | null> {
-    const gitDir = await this.resolveGitDir(cwd)
-    if (!gitDir) return null
+    const repo = await this.resolveRepo(cwd)
+    if (!repo) return null
 
     const output = await run('git', ['status', '--porcelain=v2', '--branch'], cwd)
     // 타임아웃이나 실패 — 이전 결과를 유지하도록 null. P13-5
     if (output === null) return null
 
-    return parseStatus(output, detectOperation(gitDir))
+    return parseStatus(output, detectOperation(repo.gitDir), repoName(repo))
   }
 
-  private async resolveGitDir(cwd: string): Promise<string | null> {
-    const cached = this.gitDirCache.get(cwd)
+  private async resolveRepo(cwd: string): Promise<RepoPaths | null> {
+    const cached = this.repoCache.get(cwd)
     if (cached !== undefined) return cached
 
-    const output = await run('git', ['rev-parse', '--absolute-git-dir'], cwd)
-    if (output === null) {
+    // 한 번의 호출로 git 디렉토리와 작업 트리 루트를 함께 얻는다
+    const output = await run('git', ['rev-parse', '--absolute-git-dir', '--show-toplevel'], cwd)
+    if (output !== null) {
+      const lines = output
+        .trim()
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const found: RepoPaths = { gitDir: lines[0] ?? '', root: lines[1] ?? null }
+      if (found.gitDir) {
+        this.repoCache.set(cwd, found)
+        return found
+      }
+    }
+
+    // bare 저장소에는 작업 트리가 없어 위 호출이 통째로 실패한다 — 디렉토리만 다시 묻는다
+    const dirOnly = await run('git', ['rev-parse', '--absolute-git-dir'], cwd)
+    if (dirOnly === null) {
       // git 자체가 없는지, 그냥 저장소가 아닌지 구분한다
       if (!(await this.checkGitInstalled())) {
         this.available = false
         return null
       }
-      this.gitDirCache.set(cwd, null) // 저장소가 아님. P13-1
+      this.repoCache.set(cwd, null) // 저장소가 아님. P13-1
       return null
     }
 
-    const gitDir = output.trim()
-    this.gitDirCache.set(cwd, gitDir)
-    return gitDir
+    const bare: RepoPaths = { gitDir: dirOnly.trim(), root: null }
+    this.repoCache.set(cwd, bare)
+    return bare
   }
 
   private async checkGitInstalled(): Promise<boolean> {
@@ -115,8 +138,20 @@ export class GitProbe {
   }
 }
 
+/**
+ * 저장소 이름 (P13-11).
+ *
+ * 작업 트리의 뿌리 폴더명이 곧 프로젝트 이름이다. bare 저장소는 관례상
+ * `foo.git`으로 놓이므로 그 꼬리를 뗀다.
+ */
+function repoName(repo: RepoPaths): string {
+  if (repo.root) return basename(repo.root)
+  const name = basename(repo.gitDir)
+  return name.replace(/\.git$/i, '') || name
+}
+
 /** `git status --porcelain=v2 --branch` 출력을 파싱한다 */
-function parseStatus(output: string, operation: string | null): GitInfo {
+function parseStatus(output: string, operation: string | null, repo: string): GitInfo {
   let branch = ''
   let oid = ''
   let detached = false
@@ -150,5 +185,5 @@ function parseStatus(output: string, operation: string | null): GitInfo {
     branch = oid === '(initial)' ? '(빈 저장소)' : 'HEAD'
   }
 
-  return { branch, detached, dirty, ahead, behind, operation }
+  return { repo, branch, detached, dirty, ahead, behind, operation }
 }

@@ -18,6 +18,11 @@ export type StatusConfidence = 'certain' | 'inferred'
 
 /** 세션의 작업 디렉토리가 속한 git 저장소 상태. P13 */
 export interface GitInfo {
+  /**
+   * 저장소 이름 — 작업 트리 루트의 폴더명. 사이드바에서 "지금 어느 프로젝트인가"를
+   * 답하는 값이라 경로보다 이것이 먼저 온다. worktree면 그 worktree의 이름. P13-11
+   */
+  repo: string
   /** 브랜치명, detached면 짧은 커밋 해시. P13-3 */
   branch: string
   detached: boolean
@@ -112,6 +117,13 @@ export interface SessionExitInfo {
   exitSignal: number | null
 }
 
+/** 붙여넣기 시점의 클립보드 상태. P7-4 / P7-5 */
+export interface ClipboardContent {
+  text: string
+  /** 텍스트는 없고 이미지만 들어 있는가 — 터미널이 실어 나를 수 없는 종류 */
+  hasImage: boolean
+}
+
 export const IPC = {
   // renderer → main (invoke)
   LIST: 'session:list',
@@ -125,6 +137,8 @@ export const IPC = {
   MARK_READ: 'session:mark-read',
   RESIZE_HINT: 'session:resize-hint',
   CONFIRM_PASTE: 'app:confirm-paste',
+  /** 클립보드 내용 조회 — 렌더러는 샌드박스라 직접 읽을 수 없다. P7-4 */
+  READ_CLIPBOARD: 'app:read-clipboard',
   /** 어떤 세션을 보고 있는지 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2 */
   SET_ACTIVE: 'app:set-active',
   /** pane 배치 저장/복원. P16 / P17 */
@@ -153,6 +167,7 @@ export interface CvmuxApi {
   setTitle(id: string, title: string | null): Promise<boolean>
   markRead(id: string): Promise<boolean>
   confirmPaste(bytes: number): Promise<boolean>
+  readClipboard(): Promise<ClipboardContent>
   setActive(id: string | null): Promise<boolean>
   /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
   loadLayout(): Promise<Workspace[]>

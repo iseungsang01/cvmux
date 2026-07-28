@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import {
   IPC,
+  type ClipboardContent,
   type CreateSessionOptions,
   type CreateSessionResult,
   type CvmuxApi,
@@ -43,6 +44,7 @@ const api: CvmuxApi = {
   setTitle: (id, title) => ipcRenderer.invoke(IPC.SET_TITLE, id, title) as Promise<boolean>,
   markRead: (id) => ipcRenderer.invoke(IPC.MARK_READ, id) as Promise<boolean>,
   confirmPaste: (bytes) => ipcRenderer.invoke(IPC.CONFIRM_PASTE, bytes) as Promise<boolean>,
+  readClipboard: () => ipcRenderer.invoke(IPC.READ_CLIPBOARD) as Promise<ClipboardContent>,
   setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
   loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<Workspace[]>,
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
