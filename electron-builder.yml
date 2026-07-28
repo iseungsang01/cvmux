@@ -1,0 +1,42 @@
+appId: com.cvmux.app
+productName: cvmux
+copyright: MIT
+
+directories:
+  output: release
+  buildResources: build
+
+# node-pty는 N-API(node-addon-api) 모듈이라 ABI가 고정돼 있다. npm이 설치한
+# 바이너리가 Electron에서 그대로 동작하는 것을 실측으로 확인했으므로 다시 빌드하지
+# 않는다. 켜두면 node-gyp가 Visual Studio를 찾다 실패하고, 빌드하려면 2GB짜리
+# 빌드 도구를 깔아야 하는데 얻는 게 없다.
+npmRebuild: false
+
+# renderer/main/preload는 전부 out/ 에 번들되어 있다. node_modules에서 실제로
+# 필요한 것은 네이티브 모듈인 node-pty 하나뿐이라 나머지는 담지 않는다.
+files:
+  - out/**/*
+  - package.json
+  - '!node_modules/**/*'
+  - node_modules/node-pty/**/*
+
+# 네이티브 모듈은 asar 안에서 로드할 수 없다. conpty.dll과 OpenConsole.exe도
+# 실제 파일 경로로 존재해야 ConPTY가 뜬다.
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: cvmux
+  deleteAppDataOnUninstall: false

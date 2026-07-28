@@ -10,6 +10,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "package": "electron-vite build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "npm run test:state && npm run test:layout",
     "test:state": "esbuild tests/session-state.test.ts --bundle --platform=node --format=esm --outfile=out/tests/session-state.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/session-state.mjs",
@@ -36,6 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"

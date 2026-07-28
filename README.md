@@ -144,12 +144,20 @@ PSReadLine과 bash가 쓰는 키라 앱이 가로채면 안 된다. 터미널이
 
 ```powershell
 npm install
-npm run dev     # 개발 (HMR)
-npm run build   # 프로덕션 빌드
-npm start       # 빌드 결과 실행
-npm test        # 상태 감지 엔진 회귀 테스트
+npm run dev      # 개발 (HMR)
+npm run build    # 프로덕션 빌드
+npm start        # 빌드 결과 실행
+npm test         # 회귀 테스트 (상태 감지 + pane 레이아웃)
 npm run typecheck
+npm run package  # Windows 설치 프로그램 생성 → release/
 ```
+
+`npm run package`는 `release/cvmux-0.1.0-setup.exe`를 만든다. 설치하면 시작 메뉴와
+바탕화면에 바로가기가 생기고, 그때부터는 런처 PowerShell 없이 바로 띄울 수 있다.
+관리자 권한은 필요 없다(사용자 폴더에 설치).
+
+서명하지 않은 설치 파일이라 SmartScreen이 한 번 경고한다. "추가 정보 → 실행"으로
+넘어가면 된다.
 
 Node 18+ 와 Windows 10 1809(빌드 17763) 이상이 필요하다. ConPTY를 쓰기 때문이다.
 
