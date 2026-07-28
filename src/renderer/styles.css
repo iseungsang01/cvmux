@@ -1,0 +1,561 @@
+:root {
+  --bg: #0d1016;
+  --bg-sidebar: #11151d;
+  --bg-row: #161c27;
+  --bg-row-active: #1d2634;
+  --border: #222a38;
+  --text: #d3d9e3;
+  --text-dim: #7d8698;
+  --text-faint: #5a6376;
+  --accent: #7aa2f7;
+  --busy: #9ece6a;
+  --danger: #f7768e;
+  --sidebar-width: 264px;
+  --titlebar-height: 36px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Malgun Gothic', system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #1a212d;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── 타이틀바 ─────────────────────────────────────────────── */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--titlebar-height);
+  padding-left: 8px;
+  /* 오른쪽은 시스템 창 제어 버튼(titleBarOverlay) 자리 */
+  padding-right: 148px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  -webkit-app-region: drag;
+}
+
+.titlebar-toggle,
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-title {
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 사이드바 ─────────────────────────────────────────────── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: var(--sidebar-width);
+  border-right: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  transition: width 180ms ease, opacity 180ms ease;
+}
+
+.sidebar.is-collapsed {
+  width: 0;
+  border-right-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 10px 10px 8px 12px;
+}
+
+.sidebar-brand {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+  border: 1px solid #4a2530;
+  border-radius: 6px;
+  background: #2a1620;
+  color: #ffb4c0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 8px 8px;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  position: relative;
+  margin-bottom: 4px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--bg-row);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.session-row:hover {
+  background: var(--bg-row-active);
+}
+
+.session-row.is-active {
+  border-color: #2f3d54;
+  background: var(--bg-row-active);
+}
+
+/* 입력을 기다리는 세션에 파란 링 — cmux의 핵심 신호. P4-1 */
+.session-row.is-attention {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgb(122 162 247 / 25%), 0 0 14px -4px rgb(122 162 247 / 45%);
+}
+
+.session-row.is-exited {
+  opacity: 0.72;
+}
+
+.session-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.session-title {
+  overflow: hidden;
+  flex: 1;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-index {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-cwd,
+.session-preview,
+.session-exit,
+.session-warning {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cwd {
+  margin-top: 1px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.session-preview {
+  margin-top: 4px;
+  min-height: 15px;
+  color: var(--text-dim);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+}
+
+.session-exit {
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.session-exit.is-failed {
+  color: var(--danger);
+}
+
+.session-warning {
+  margin-top: 4px;
+  color: #ffc777;
+  font-size: 11px;
+  white-space: normal;
+}
+
+.session-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.session-row:hover .session-close {
+  opacity: 1;
+}
+
+.session-close:hover {
+  background: #33202a;
+  color: var(--danger);
+}
+
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ── 상태 인디케이터 ──────────────────────────────────────── */
+
+.status-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+
+.status-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+/* 실행 중 — 초록 점이 숨쉰다 */
+.status-dot.is-busy .status-core {
+  background: var(--busy);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* 대기 — 속이 빈 회색 원 */
+.status-dot.is-idle .status-core {
+  border: 1.5px solid var(--text-faint);
+  background: transparent;
+}
+
+/* 입력 대기(추정) / 확인 필요(확실) — 파란 링 */
+.status-dot.is-waiting .status-core,
+.status-dot.is-attention .status-core {
+  background: var(--accent);
+}
+
+.status-dot.is-waiting::after,
+.status-dot.is-attention::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+}
+
+.status-dot.is-attention::after {
+  animation: ring 1.8s ease-out infinite;
+}
+
+/* 추측으로 판정한 상태는 옅게 — 확실한 신호와 구분한다. P0-3 */
+.status-dot.is-inferred.is-waiting .status-core {
+  background: transparent;
+}
+
+.status-dot.is-inferred.is-waiting::after {
+  border-style: dashed;
+}
+
+/* 종료 — 사각형 */
+.status-dot.is-exited .status-core {
+  border-radius: 2px;
+  background: var(--text-faint);
+}
+
+/* 미읽음 알림 배지 */
+.status-dot.has-unread::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 1;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--bg-row);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.is-busy .status-core,
+  .status-dot.is-attention::after {
+    animation: none;
+  }
+}
+
+/* ── 터미널 영역 ──────────────────────────────────────────── */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.deck {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * 비활성 세션도 DOM에 남긴다 — display:none이면 크기가 0이 되어
+ * 전환할 때마다 터미널이 재랩된다. visibility로만 감춘다. P5-1 / P2-3
+ */
+.pane {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: 6px 2px 6px 8px;
+  visibility: hidden;
+}
+
+.pane.is-active {
+  z-index: 1;
+  visibility: visible;
+}
+
+/* 에이전트가 기다리는 패널에 파란 링. P4-1 */
+.pane.is-attention::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 1px solid rgb(122 162 247 / 45%);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.pane.is-attention.is-certain::after {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 22px -12px var(--accent);
+}
+
+.pane-terminal {
+  width: 100%;
+  height: 100%;
+}
+
+.pane-exit {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 2;
+  max-width: 60%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(17 21 29 / 94%);
+}
+
+.pane-exit-code {
+  color: var(--text-dim);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+}
+
+.pane-exit-code.is-failed {
+  color: var(--danger);
+}
+
+.pane-exit-hint {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.pane-exit-warning {
+  margin-top: 6px;
+  color: #ffc777;
+  font-size: 11px;
+}
+
+/* ── 빈 상태 ──────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--text-faint);
+}
+
+.empty h1 {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.empty p {
+  margin: 0;
+}
+
+/* ── 버튼 ─────────────────────────────────────────────────── */
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--bg-row-active);
+  color: var(--text);
+}
+
+.primary-button {
+  margin-top: 6px;
+  padding: 7px 16px;
+  border: 1px solid #2f3d54;
+  border-radius: 6px;
+  background: var(--bg-row-active);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary-button:hover {
+  border-color: var(--accent);
+}
+
+/* ── 스크롤바 ─────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background: #2b3446;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a465c;
+  background-clip: content-box;
+}
