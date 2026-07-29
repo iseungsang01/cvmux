@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 
 import type { SessionMeta, Workspace } from '@shared/types'
 import { gitTooltip, isFailedExit, splitPorts, statusLabel, whereLabel } from '../lib/format'
@@ -49,6 +49,8 @@ interface SidebarProps {
   renamingId: string | null
   onRenameStart(id: string): void
   onRenameEnd(): void
+  /** 줄 순서 바꾸기. 자리는 배열 위치이고, 그것이 곧 Ctrl+Alt+숫자의 번호다. P19-8 */
+  onReorder(from: number, to: number): void
 }
 
 export function Sidebar({
@@ -64,8 +66,24 @@ export function Sidebar({
   onRename,
   renamingId,
   onRenameStart,
-  onRenameEnd
+  onRenameEnd,
+  onReorder
 }: SidebarProps): JSX.Element {
+  /*
+   * 드래그로 순서 바꾸기 (P19-8).
+   *
+   * 끌고 있는 줄과 놓일 자리를 사이드바가 함께 들고 있어야 한다 — 어느 줄에
+   * 선을 그을지는 그 둘의 관계로만 정해지기 때문이다. 아래로 끌면 대상 줄의
+   * 아래, 위로 끌면 위에 긋는다.
+   */
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [overIndex, setOverIndex] = useState<number | null>(null)
+
+  const endDrag = (): void => {
+    setDragIndex(null)
+    setOverIndex(null)
+  }
+
   return (
     <aside className={`sidebar${collapsed ? ' is-collapsed' : ''}`} aria-hidden={collapsed}>
       <header className="sidebar-head">
@@ -100,11 +118,27 @@ export function Sidebar({
             index={index}
             active={workspace.id === activeId}
             renaming={workspace.id === renamingId}
+            dragging={dragIndex === index}
+            // 끌어온 방향이 선의 위치를 정한다 — 놓으면 그 줄 자리에 들어간다
+            dropEdge={
+              dragIndex === null || overIndex !== index || dragIndex === index
+                ? null
+                : dragIndex < index
+                  ? 'below'
+                  : 'above'
+            }
             onSelect={onSelect}
             onClose={onClose}
             onRename={onRename}
             onRenameStart={onRenameStart}
             onRenameEnd={onRenameEnd}
+            onDragStart={() => setDragIndex(index)}
+            onDragOverRow={() => setOverIndex(index)}
+            onDropRow={() => {
+              if (dragIndex !== null) onReorder(dragIndex, index)
+              endDrag()
+            }}
+            onDragEnd={endDrag}
           />
         ))}
       </ul>
@@ -123,11 +157,19 @@ interface WorkspaceRowProps {
   index: number
   active: boolean
   renaming: boolean
+  /** 이 줄을 끌고 있다 */
+  dragging: boolean
+  /** 놓으면 이 줄의 어느 쪽에 들어가는지. 표시할 것이 없으면 null. P19-8 */
+  dropEdge: 'above' | 'below' | null
   onSelect(id: string): void
   onClose(id: string): void
   onRename(id: string, title: string | null): void
   onRenameStart(id: string): void
   onRenameEnd(): void
+  onDragStart(): void
+  onDragOverRow(): void
+  onDropRow(): void
+  onDragEnd(): void
 }
 
 function WorkspaceRow({
@@ -136,11 +178,17 @@ function WorkspaceRow({
   index,
   active,
   renaming,
+  dragging,
+  dropEdge,
   onSelect,
   onClose,
   onRename,
   onRenameStart,
-  onRenameEnd
+  onRenameEnd,
+  onDragStart,
+  onDragOverRow,
+  onDropRow,
+  onDragEnd
 }: WorkspaceRowProps): JSX.Element | null {
   // 대표 pane이 상태·미리보기·git·포트를 모두 대표한다. P17-7 / P17-8
   const session = representativeSession(workspace, sessions)
@@ -154,7 +202,10 @@ function WorkspaceRow({
     'session-row',
     active ? 'is-active' : '',
     needsAttention ? 'is-attention' : '',
-    session.status === 'exited' ? 'is-exited' : ''
+    session.status === 'exited' ? 'is-exited' : '',
+    dragging ? 'is-dragging' : '',
+    dropEdge === 'above' ? 'is-drop-above' : '',
+    dropEdge === 'below' ? 'is-drop-below' : ''
   ]
     .filter(Boolean)
     .join(' ')
@@ -167,6 +218,31 @@ function WorkspaceRow({
         className={classes}
         role="button"
         tabIndex={0}
+        /*
+         * 이름을 고치는 동안에는 끌 수 없다 (P19-8).
+         *
+         * 입력창 안에서 글자를 끌어 선택하는 것이 줄 전체를 옮기는 동작으로
+         * 새면, 이름을 다듬으려던 사람이 순서를 흐트러뜨리게 된다.
+         */
+        draggable={!renaming}
+        onDragStart={(event: DragEvent<HTMLDivElement>) => {
+          // 데이터를 실어야 드래그가 시작된다. 받는 쪽은 자리 번호만 알면 된다
+          event.dataTransfer.setData('text/plain', String(index))
+          event.dataTransfer.effectAllowed = 'move'
+          onDragStart()
+        }}
+        onDragOver={(event: DragEvent<HTMLDivElement>) => {
+          // preventDefault를 해야 이 줄이 드롭을 받는다
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          onDragOverRow()
+        }}
+        onDrop={(event: DragEvent<HTMLDivElement>) => {
+          event.preventDefault()
+          onDropRow()
+        }}
+        // 목록 밖에서 손을 놓아도 끌던 표시는 걷어야 한다
+        onDragEnd={onDragEnd}
         onClick={() => onSelect(workspace.id)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -176,7 +252,7 @@ function WorkspaceRow({
         }}
         title={`${title}\n${session.cwd}\n${statusLabel(session)}${
           panes > 1 ? `\npane ${panes}개` : ''
-        }\n이름 바꾸기: 제목 더블클릭 또는 Ctrl+Shift+E`}
+        }\n이름 바꾸기: 제목 더블클릭 또는 Ctrl+Shift+E\n순서 바꾸기: 위아래로 끌기`}
       >
         <StatusDot session={session} />
 

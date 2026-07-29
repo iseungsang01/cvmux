@@ -76,3 +76,21 @@ export function workspaceTitle(
 export function paneIds(workspace: Workspace): string[] {
   return collectLeaves(workspace.root).map((leaf) => leaf.id)
 }
+
+/**
+ * 목록에서 한 줄을 뽑아 다른 자리에 끼운다 (P19-8).
+ *
+ * 범위를 벗어난 자리는 원본을 그대로 돌려준다. 드래그가 목록 밖에서 끝나거나
+ * 그 사이 세션이 닫혀 자리가 사라지는 일이 실제로 생기는데, 그때 순서가
+ * 흐트러지는 것보다 아무 일도 일어나지 않는 편이 낫다.
+ */
+export function reorder<T>(list: T[], from: number, to: number): T[] {
+  if (from === to) return list
+  if (from < 0 || from >= list.length) return list
+  if (to < 0 || to >= list.length) return list
+
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}

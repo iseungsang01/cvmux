@@ -183,6 +183,37 @@ kbd {
   opacity: 0.72;
 }
 
+/*
+ * 순서 바꾸기 (P19-8).
+ *
+ * 끌고 있는 줄은 옅게 두어 "지금 들려 있다"를 보이고, 놓일 자리에는 선을 긋는다.
+ * 선은 줄 사이 여백에 놓아 어느 틈으로 들어가는지 가리키게 한다 — 줄 위에
+ * 덧그리면 그 줄을 덮어쓴다는 뜻으로 읽힌다.
+ */
+.session-row.is-dragging {
+  opacity: 0.4;
+}
+
+.session-row.is-drop-above::after,
+.session-row.is-drop-below::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.session-row.is-drop-above::after {
+  top: -3px;
+}
+
+.session-row.is-drop-below::after {
+  bottom: -3px;
+}
+
 .session-body {
   flex: 1;
   min-width: 0;

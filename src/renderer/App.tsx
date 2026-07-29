@@ -11,7 +11,7 @@ import {
   resizeSplit,
   splitPane
 } from './lib/layout'
-import { focusedSessionId, makeWorkspace } from './lib/workspace'
+import { focusedSessionId, makeWorkspace, reorder } from './lib/workspace'
 import { TerminalHost } from './terminal-host'
 
 /**
@@ -403,6 +403,17 @@ export function App(): JSX.Element {
     setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? { ...w, title } : w)))
   }, [])
 
+  /**
+   * 사이드바 줄 순서 바꾸기 (P19-8).
+   *
+   * 배열 위치가 곧 화면의 자리이고 `Ctrl+Alt+숫자`의 번호이므로, 옮기면 번호도
+   * 따라 바뀐다 — 자주 쓰는 세션을 앞으로 끌어다 두면 1번이 되는 것이 자연스럽다.
+   * 저장은 배치 변경을 지켜보는 기존 경로가 알아서 한다(P16 / P17).
+   */
+  const reorderWorkspaces = useCallback((from: number, to: number): void => {
+    setWorkspaces((prev) => reorder(prev, from, to))
+  }, [])
+
   const handleResize = useCallback(
     (splitId: string, dividerIndex: number, delta: number, minRatio: number): void => {
       setWorkspaces((prev) =>
@@ -448,6 +459,7 @@ export function App(): JSX.Element {
           renamingId={renamingId}
           onRenameStart={setRenamingId}
           onRenameEnd={() => setRenamingId(null)}
+          onReorder={reorderWorkspaces}
         />
 
         <main className="main">

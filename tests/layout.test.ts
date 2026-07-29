@@ -16,6 +16,7 @@ import {
   resizeSplit,
   splitPane
 } from '../src/renderer/lib/layout'
+import { reorder } from '../src/renderer/lib/workspace'
 
 const results: string[] = []
 let failed = 0
@@ -176,6 +177,32 @@ function main(): void {
     check('없는 pane 분할 → null', result === null, String(result))
     const closed = closePane(root, 'no-such-pane')
     check('없는 pane 닫기 → 원본 유지', closed !== null && shape(closed) === 's1', closed ? shape(closed) : 'null')
+  }
+
+  /*
+   * ── P19-8: 사이드바 줄 순서 바꾸기
+   *
+   * 배열 위치가 곧 화면의 자리이자 Ctrl+Alt+숫자의 번호다. 드래그가 목록 밖에서
+   * 끝나거나 그 사이 세션이 닫히면 범위를 벗어난 자리가 들어올 수 있는데,
+   * 그때 순서가 흐트러지면 안 된다.
+   */
+  {
+    const list = ['a', 'b', 'c', 'd']
+
+    check('P19-8 아래로 이동', reorder(list, 0, 2).join('') === 'bcad', reorder(list, 0, 2).join(''))
+    check('P19-8 위로 이동', reorder(list, 3, 1).join('') === 'adbc', reorder(list, 3, 1).join(''))
+    check(
+      'P19-8 맨 끝으로 이동',
+      reorder(list, 0, 3).join('') === 'bcda',
+      reorder(list, 0, 3).join('')
+    )
+    check('P19-8 제자리는 원본 그대로', reorder(list, 1, 1) === list)
+    check('P19-8 원본을 건드리지 않는다', list.join('') === 'abcd', list.join(''))
+
+    // 범위를 벗어난 자리는 아무 일도 일으키지 않는다
+    check('P19-8 범위 밖 출발', reorder(list, -1, 2) === list)
+    check('P19-8 범위 밖 도착', reorder(list, 0, 9) === list)
+    check('P19-8 빈 목록', reorder([], 0, 1).length === 0)
   }
 
   console.log(results.join('\n'))
