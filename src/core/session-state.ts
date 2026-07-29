@@ -69,6 +69,8 @@ export class SessionState {
   private dirtyTimer: NodeJS.Timeout | null = null
   private lastBellAt = 0
   private suppressUntil = 0
+  /** 마지막으로 사용자가 키를 누른 시각 — 뒤따르는 출력이 에코인지 가른다. P4-15 */
+  private lastInputAt = 0
   /** 셸이 OSC 133을 보내고 있는가 — 그렇다면 정규식 휴리스틱을 쓰지 않는다 */
   private shellIntegration = false
   private commandRunning = false
@@ -96,10 +98,11 @@ export class SessionState {
   ingest(chunk: string): void {
     if (this.disposed) return
 
+    const now = Date.now()
     // busy를 먼저 세우고 파싱한다. 순서가 반대면 청크 안의 OSC 9/133이
     // attention/idle을 설정한 직후 busy가 덮어써서 알림이 통째로 사라진다.
     // 출력이 흘렀으니 busy, 단 그 출력에 명시적 신호가 있으면 그쪽이 이긴다. P4-1 / P4-6
-    if (this.status !== 'exited' && Date.now() >= this.suppressUntil) {
+    if (this.status !== 'exited' && now >= this.suppressUntil && !this.isEcho(now)) {
       // 리사이즈 직후의 reflow 출력은 상태 전이를 일으키지 않는다. P2-4
       this.set('busy', 'inferred')
     }
@@ -109,9 +112,26 @@ export class SessionState {
     this.armIdle()
   }
 
+  /**
+   * 내가 방금 친 글자가 되비친 것인가 (P4-15).
+   *
+   * 셸도 에이전트 CLI도 키를 누를 때마다 입력 줄을 통째로 다시 그린다. 그
+   * 출력까지 "일이 돌아간다"로 세면 타이핑하는 내내 신호등이 깜빡인다 —
+   * 한 글자마다 초록으로 올라갔다가 400ms 침묵마다 빨강으로 내려오기 때문이다.
+   * 내가 친 글자가 화면에 나타난 것은 아무 일도 아니다.
+   *
+   * 에코를 걷어내도 명시적 신호는 그대로 지나간다. 엔터를 눌러 명령을
+   * 시작하면 셸 통합이 같은 청크에 실어 보내는 133;C가 즉시 초록을 켠다 —
+   * 이 판정은 5순위(출력 흐름)에만 적용된다.
+   */
+  private isEcho(now: number): boolean {
+    return now - this.lastInputAt < POLICY.ECHO_WINDOW_MS
+  }
+
   /** 사용자 입력. 타이핑 중 waiting으로 튀지 않도록 유휴 타이머를 리셋한다. P4-11 */
   noteInput(): void {
     if (this.disposed || this.status === 'exited') return
+    this.lastInputAt = Date.now()
     this.armIdle()
   }
 
@@ -135,6 +155,7 @@ export class SessionState {
     this.shellIntegration = false
     this.commandRunning = false
     this.suppressUntil = 0
+    this.lastInputAt = 0
     this.set('busy', 'inferred')
   }
 

@@ -26,6 +26,14 @@ export const POLICY = {
   /** 출력이 멎은 뒤 idle/waiting으로 판정하기까지의 유휴 시간(ms). P4-7 / P4-8 */
   IDLE_THRESHOLD_MS: 400,
 
+  /**
+   * 사용자 입력 직후 이 시간 안에 도착한 출력은 타이핑 에코로 본다. P4-15
+   *
+   * 유휴 문턱(400ms)보다 넉넉히 짧아야 한다. 길면 명령을 시작한 직후의
+   * 진짜 출력까지 삼켜 초록이 늦게 켜진다.
+   */
+  ECHO_WINDOW_MS: 200,
+
   /** 창 리사이즈 → PTY resize 디바운스(ms). ConPTY resize는 비싸다. P2-2 */
   RESIZE_DEBOUNCE_MS: 60,
 

@@ -301,6 +301,63 @@ async function main(): Promise<void> {
     s.dispose()
   }
 
+  /*
+   * ── P4-15: 타이핑하는 동안 신호등이 깜빡이면 안 된다
+   *
+   * 실제로 보고된 증상이다 — "이거 치면서도 계속 빨강 초록 왔다갔다해".
+   * 에이전트 CLI는 키를 누를 때마다 입력 줄을 통째로 다시 그리는데, 그 에코를
+   * 출력으로 세면 한 글자마다 초록이 켜지고 손을 멈출 때마다 빨강이 켜진다.
+   */
+  {
+    const { s } = make()
+    s.ingest('\x1b[?1049h')
+    s.ingest('\x1b[36;1H> ')
+    await sleep(IDLE_WAIT)
+    check('P4-15 준비: 조용한 에이전트는 waiting', s.status === 'waiting', s.status)
+
+    // 사용자가 한 글자씩 친다 — 셸이 입력 줄을 다시 그린다
+    for (const text of ['안', '안녕', '안녕하']) {
+      s.noteInput()
+      s.ingest(`\x1b[36;1H> ${text}`)
+      check(`P4-15 타이핑 에코("${text}")는 초록을 켜지 않는다`, s.status === 'waiting', s.status)
+    }
+
+    // 에코 창(200ms)을 지나 도착한 것은 진짜 출력이다
+    await sleep(250)
+    s.ingest('\x1b[36;1H✻ 답을 쓰는 중')
+    check('P4-15 에코 창을 지난 출력은 busy', s.status === 'busy', s.status)
+    s.dispose()
+  }
+
+  // ── P4-15 / P4-11: 프롬프트에서 타이핑해도 idle 그대로 (빈손 상태가 흔들리지 않는다)
+  {
+    const { s } = make()
+    s.ingest('PS C:\\Users\\lss> ')
+    await sleep(IDLE_WAIT)
+    s.noteInput()
+    s.ingest('g')
+    s.noteInput()
+    s.ingest('i')
+    check('P4-15 프롬프트에서 타이핑 중 idle 유지', s.status === 'idle', s.status)
+    s.dispose()
+  }
+
+  /*
+   * ── P4-15: 엔터를 눌러 명령을 시작하면 곧바로 초록이어야 한다
+   *
+   * 에코를 걷어내느라 명령 시작까지 놓치면 반대쪽 함정에 빠진다. 셸 통합의
+   * 133;C는 5순위가 아니라 3순위 신호이므로 에코 창 안에서도 그대로 통과한다.
+   */
+  {
+    const { s } = make()
+    s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
+    await sleep(IDLE_WAIT)
+    s.noteInput() // 엔터
+    s.ingest('\x1b]133;C\x07\r\n')
+    check('P4-15 에코 창 안이어도 133;C는 busy(확실)', s.status === 'busy' && s.confidence === 'certain', `${s.status}/${s.confidence}`)
+    s.dispose()
+  }
+
   // ── P4-10 / P4-13: CR 덮어쓰기는 마지막 상태만 남는다
   {
     const { s } = make()
