@@ -370,6 +370,41 @@ kbd {
 }
 
 /*
+ * 따로 도는 셸 (P14-13).
+ *
+ * 신호등의 세 색(초록·노랑·빨강)을 쓰지 않는다. 그 색들은 "지금 나를
+ * 필요로 하는가"에만 답해야 하고, 이 칩은 다른 질문에 답한다. 그래서
+ * 청록으로 따로 선다 — 세션이 조용해 보여도 안에서 명령이 돌고 있다는 뜻이다.
+ */
+.fact-shells {
+  padding: 1px 5px;
+  border: 1px solid #1d4f52;
+  border-radius: 3px;
+  background: #102b2e;
+  color: #5fd3c8;
+  font-variant-numeric: tabular-nums;
+}
+
+.fact-shell-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentcolor;
+  /* 돌고 있다는 뜻이므로 숨을 쉰다. 상태 점의 펄스와 같은 언어 */
+  animation: shell-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes shell-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/*
  * 지금 어떤가 (P19-2).
  *
  * 마지막 출력 줄을 흘려보내던 자리다. 에이전트 CLI 안에서는 사용자가 치는
@@ -589,7 +624,8 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .status-dot.is-busy .status-core,
-  .status-dot.is-attention::after {
+  .status-dot.is-attention::after,
+  .fact-shell-dot {
     animation: none;
   }
 }

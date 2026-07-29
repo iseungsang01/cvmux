@@ -47,6 +47,7 @@ function session(cwd: string, gitInfo: GitInfo | null): SessionMeta {
     exitSignal: null,
     warning: null,
     altScreen: false,
+    shells: [],
     git: gitInfo,
     ports: [],
     createdAt: 0

@@ -15,7 +15,7 @@ import type {
   SessionMeta,
   SessionSnapshot
 } from '@shared/types'
-import { ProbeScheduler, gitInfoEqual, portsEqual } from './probe-scheduler'
+import { ProbeScheduler, gitInfoEqual, portsEqual, shellsEqual } from './probe-scheduler'
 import { SessionState } from './session-state'
 import { trimScrollback, type PersistedSession } from './store'
 
@@ -207,6 +207,8 @@ class Session {
   /** 주변 정보 — 프로브가 채운다. P13 / P14 */
   git: GitInfo | null = null
   ports: number[] = []
+  /** 이 세션 아래에서 따로 도는 셸들. P14-13 */
+  shells: string[] = []
 
   private startedAt = 0
   /** 저장된 스크롤백에서 되살아난 세션인가. P16-6 */
@@ -448,6 +450,7 @@ class Session {
       altScreen: this.state.altScreen,
       git: this.git,
       ports: this.ports,
+      shells: this.shells,
       createdAt: this.createdAt
     }
   }
@@ -565,6 +568,10 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       }
       if (patch.ports !== undefined && !portsEqual(session.ports, patch.ports)) {
         session.ports = patch.ports
+        changed = true
+      }
+      if (patch.shells !== undefined && !shellsEqual(session.shells, patch.shells)) {
+        session.shells = patch.shells
         changed = true
       }
       // 값이 그대로면 IPC를 보내지 않는다. 폴링이 렌더러를 매초 흔들면 안 된다

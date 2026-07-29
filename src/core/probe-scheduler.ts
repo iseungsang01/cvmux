@@ -28,6 +28,8 @@ export interface ProbeTarget {
 export interface ProbePatch {
   git?: GitInfo | null
   ports?: number[]
+  /** 세션 아래에서 따로 도는 셸 이름들. P14-13 */
+  shells?: string[]
 }
 
 /** 메인 → 워커 */
@@ -251,6 +253,13 @@ export function gitInfoEqual(a: GitInfo | null, b: GitInfo | null): boolean {
 }
 
 export function portsEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** 양쪽 모두 정렬되어 오므로 순서까지 비교하면 된다. P14-13 */
+export function shellsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true

@@ -43,10 +43,15 @@ async function probePorts(
 ): Promise<void> {
   if (!ports.enabled) return
   // 스냅샷은 한 번, 결과는 모든 세션이 나눠 쓴다. P14-5
-  await ports.refresh()
+  // 일이 돌아가는 중이면 프로세스 트리를 자주 다시 뜬다. P14-13
+  await ports.refresh(targets.some((t) => t.busy))
   for (const target of targets) {
     if (target.pid === null) continue
-    merge(patches, target.id, { ports: ports.portsFor(target.pid) })
+    // 포트와 셸은 같은 스냅샷에서 나온다 — 조사를 두 번 하지 않는다. P14-13
+    merge(patches, target.id, {
+      ports: ports.portsFor(target.pid),
+      shells: ports.shellsFor(target.pid)
+    })
   }
 }
 

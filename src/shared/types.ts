@@ -67,6 +67,13 @@ export interface SessionMeta {
   git: GitInfo | null
   /** 이 세션의 프로세스 트리가 리슨 중인 포트 (오름차순). P14 */
   ports: number[]
+  /**
+   * 세션 셸 아래에서 따로 도는 셸들의 이름 (P14-13).
+   *
+   * 에이전트가 명령을 돌리려고 자기 셸을 띄우면 여기 잡힌다. 비어 있으면
+   * 세션 셸 하나뿐이라는 뜻이다.
+   */
+  shells: string[]
   createdAt: number
 }
 

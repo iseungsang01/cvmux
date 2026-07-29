@@ -395,13 +395,30 @@ function TitleEditor({ value, onCommit, onCancel }: TitleEditorProps): JSX.Eleme
 
 /** git 브랜치와 리슨 포트 — cmux 사이드바의 그 줄. P13 / P14 */
 function SessionFacts({ session }: { session: SessionMeta }): JSX.Element | null {
-  const { git, ports } = session
-  if (!git && ports.length === 0) return null
+  const { git, ports, shells } = session
+  if (!git && ports.length === 0 && shells.length === 0) return null
 
   const { shown, extra } = splitPorts(ports)
 
   return (
     <div className="session-facts">
+      {/*
+        에이전트가 따로 띄운 셸 (P14-13).
+
+        신호등(초록/노랑/빨강)은 "지금 나를 필요로 하는가"에 답한다. 이 칩은
+        다른 질문에 답하므로 색도 달라야 한다 — 세션이 조용해 보여도 그 안에서
+        명령이 돌고 있다는 사실을 알린다.
+      */}
+      {shells.length > 0 && (
+        <span
+          className="fact fact-shells"
+          title={`따로 도는 셸 ${shells.length}개: ${shells.join(', ')}`}
+        >
+          <span className="fact-shell-dot" />
+          {shells.length === 1 ? '셸' : `셸 ${shells.length}`}
+        </span>
+      )}
+
       {git && (
         <span className={`fact fact-git${git.dirty ? ' is-dirty' : ''}`} title={gitTooltip(git)}>
           {/* 브랜치는 ⎇, detached HEAD는 커밋을 가리키므로 ◉ */}

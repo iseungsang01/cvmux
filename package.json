@@ -12,10 +12,11 @@
     "start": "electron-vite preview",
     "package": "electron-vite build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "npm run test:state && npm run test:layout && npm run test:format",
+    "test": "npm run test:state && npm run test:layout && npm run test:format && npm run test:tree",
     "test:state": "esbuild tests/session-state.test.ts --bundle --platform=node --format=esm --outfile=out/tests/session-state.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/session-state.mjs",
     "test:layout": "esbuild tests/layout.test.ts --bundle --platform=node --format=esm --outfile=out/tests/layout.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/layout.mjs",
-    "test:format": "esbuild tests/format.test.ts --bundle --platform=node --format=esm --outfile=out/tests/format.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/format.mjs"
+    "test:format": "esbuild tests/format.test.ts --bundle --platform=node --format=esm --outfile=out/tests/format.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/format.mjs",
+    "test:tree": "esbuild tests/process-tree.test.ts --bundle --platform=node --format=esm --outfile=out/tests/process-tree.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/process-tree.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
