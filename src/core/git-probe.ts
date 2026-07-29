@@ -93,7 +93,7 @@ export class GitProbe {
     // 타임아웃이나 실패 — 이전 결과를 유지하도록 null. P13-5
     if (output === null) return null
 
-    return parseStatus(output, detectOperation(repo.gitDir), repoName(repo))
+    return parseStatus(output, detectOperation(repo.gitDir), repoName(repo), repo.root)
   }
 
   private async resolveRepo(cwd: string): Promise<RepoPaths | null> {
@@ -151,7 +151,12 @@ function repoName(repo: RepoPaths): string {
 }
 
 /** `git status --porcelain=v2 --branch` 출력을 파싱한다 */
-function parseStatus(output: string, operation: string | null, repo: string): GitInfo {
+function parseStatus(
+  output: string,
+  operation: string | null,
+  repo: string,
+  root: string | null
+): GitInfo {
   let branch = ''
   let oid = ''
   let detached = false
@@ -185,5 +190,6 @@ function parseStatus(output: string, operation: string | null, repo: string): Gi
     branch = oid === '(initial)' ? '(빈 저장소)' : 'HEAD'
   }
 
-  return { repo, branch, detached, dirty, ahead, behind, operation }
+  // git이 돌려주는 루트는 `C:/a/b` 형태다. cwd와 견주려면 같은 표기여야 한다
+  return { repo, root: root?.replace(/\//g, '\\') ?? null, branch, detached, dirty, ahead, behind, operation }
 }

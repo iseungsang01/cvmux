@@ -216,6 +216,11 @@ async function dispatch(method: string, params: unknown[]): Promise<unknown> {
       return true
     }
 
+    // 앱이 물러나기 전에 "여기까지"를 확실히 남겨둔다. P20-14
+    case RPC.PERSIST:
+      persistNow()
+      return true
+
     case RPC.SHUTDOWN:
       // 응답이 나간 뒤에 정리를 시작한다 — 앱이 결과를 못 받고 끊기지 않도록
       setTimeout(() => void shutdown('앱이 종료를 요청했습니다'), 0)
@@ -263,6 +268,14 @@ function handleConnection(socket: Socket): void {
     if (!clients.delete(socket)) return
     // 앱이 사라져도 세션은 계속 돈다. 이 프로세스가 존재하는 이유가 그것이다. P20-1
     log(`앱 연결이 끊겼습니다 (남은 연결 ${clients.size}개). 세션은 계속 돕니다`)
+    /*
+     * 보는 눈이 없어진 순간 한 번 남긴다 (P20-14).
+     *
+     * 앱이 죽으면서 PERSIST를 보내지 못했을 수도 있고, 사용자가 창을 닫은
+     * 뒤 그대로 전원을 내릴 수도 있다. 주기 저장을 기다리면 그 사이의
+     * 작업 디렉토리와 화면이 통째로 사라진다.
+     */
+    if (clients.size === 0) persistNow()
   }
 
   socket.on('close', drop)

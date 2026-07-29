@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 
 import type { SessionMeta, Workspace } from '@shared/types'
-import { gitTooltip, isFailedExit, shortenPath, splitPorts, statusLabel } from '../lib/format'
+import { gitTooltip, isFailedExit, splitPorts, statusLabel, whereLabel } from '../lib/format'
 import { paneCount } from '../lib/layout'
 import { representativeSession, workspaceTitle } from '../lib/workspace'
 
@@ -17,12 +17,13 @@ import { representativeSession, workspaceTitle } from '../lib/workspace'
  * 에이전트 CLI 안에서는 사용자가 타이핑하는 글자가 그대로 새어 나왔고,
  * 그것은 상태가 아니라 소음이었다(P19-2).
  *
- * 상태 → 표시:
- *   busy      초록 점(펄스)     출력이 흐르는 중
- *   idle      회색 빈 원        프롬프트 대기
- *   waiting   파란 링           입력 대기 추정 (추측)
- *   attention 파란 링 + 점      명시적 알림 (확실)
- *   exited    사각 + 종료 코드  종료됨
+ * 왼쪽 점은 신호등이다(P4). 세 색이 답하는 질문은 하나 — 지금 나를 필요로 하는가.
+ *
+ *   busy      초록 점(펄스)     무언가 돌고 있다. 둬도 된다
+ *   waiting   노란 링(점선)     답을 기다리는 것으로 **추정**
+ *   attention 노란 점 + 링      답을 기다린다 (확실)
+ *   idle      빨간 점           할 일이 끝나 자리가 비었다
+ *   exited    회색 빈 원        셸이 죽었다 — 상태가 아니라 부재다
  */
 
 interface SidebarProps {
@@ -180,8 +181,10 @@ function WorkspaceRow({
             {index < 8 && <span className="session-index">{index + 1}</span>}
           </div>
 
-          {/* 어디인가 — 저장소 안이면 그 이름이 경로보다 정확한 답이다. P19-1 */}
-          <div className="session-where">{session.git?.repo ?? shortenPath(session.cwd)}</div>
+          {/* 어디인가 — 저장소 이름에 그 안에서의 자리를 붙인다. P19-1 / P19-7 */}
+          <div className="session-where" title={session.cwd}>
+            {whereLabel(session)}
+          </div>
 
           <SessionFacts session={session} />
 

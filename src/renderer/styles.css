@@ -8,7 +8,16 @@
   --text-dim: #7d8698;
   --text-faint: #5a6376;
   --accent: #7aa2f7;
+  /*
+   * 상태 신호등 (P4).
+   *
+   * 세 색이 사이드바에서 답하는 질문은 하나다 — 지금 나를 필요로 하는가.
+   * 초록은 돌고 있으니 둬도 된다는 뜻, 노랑은 답을 기다린다는 뜻, 빨강은
+   * 할 일이 끝나 자리가 비었다는 뜻이다.
+   */
   --busy: #9ece6a;
+  --waiting: #e0af68;
+  --done: #f7768e;
   --danger: #f7768e;
   --sidebar-width: 264px;
   --titlebar-height: 36px;
@@ -164,10 +173,10 @@ kbd {
   background: var(--bg-row-active);
 }
 
-/* 입력을 기다리는 세션에 파란 링 — cmux의 핵심 신호. P4-1 */
+/* 답을 기다리는 세션에 노란 링 — cmux의 핵심 신호. P4-1 */
 .session-row.is-attention {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgb(122 162 247 / 25%), 0 0 14px -4px rgb(122 162 247 / 45%);
+  border-color: var(--waiting);
+  box-shadow: 0 0 0 1px rgb(224 175 104 / 25%), 0 0 14px -4px rgb(224 175 104 / 45%);
 }
 
 .session-row.is-exited {
@@ -220,7 +229,7 @@ kbd {
   white-space: nowrap;
 }
 
-/* 어디인가 — 저장소 이름, 저장소가 아니면 축약 경로. P19-1 */
+/* 어디인가 — 저장소 이름과 그 안에서의 자리. 저장소가 아니면 축약 경로. P19-1 / P19-7 */
 .session-where {
   margin-top: 1px;
   color: var(--text-faint);
@@ -336,7 +345,12 @@ kbd {
 
 .session-status.is-attention,
 .session-status.is-waiting {
-  color: var(--accent);
+  color: var(--waiting);
+}
+
+/* 작업이 끝나 프롬프트로 돌아왔다 — 왼쪽 빨간 점과 같은 말을 한다 */
+.session-status.is-idle {
+  color: var(--done);
 }
 
 .session-status.is-failed {
@@ -408,22 +422,16 @@ kbd {
   background: var(--text-faint);
 }
 
-/* 실행 중 — 초록 점이 숨쉰다 */
+/* 실행 중 — 초록 점이 숨쉰다. 무언가 돌고 있으니 그냥 두면 된다 */
 .status-dot.is-busy .status-core {
   background: var(--busy);
   animation: pulse 1.6s ease-in-out infinite;
 }
 
-/* 대기 — 속이 빈 회색 원 */
-.status-dot.is-idle .status-core {
-  border: 1.5px solid var(--text-faint);
-  background: transparent;
-}
-
-/* 입력 대기(추정) / 확인 필요(확실) — 파란 링 */
+/* 답을 기다리는 중 — 노란 점. 입력 대기(추정)와 확인 필요(확실)가 같은 뜻이다 */
 .status-dot.is-waiting .status-core,
 .status-dot.is-attention .status-core {
-  background: var(--accent);
+  background: var(--waiting);
 }
 
 .status-dot.is-waiting::after,
@@ -431,7 +439,7 @@ kbd {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1.5px solid var(--accent);
+  border: 1.5px solid var(--waiting);
   border-radius: 50%;
 }
 
@@ -448,10 +456,20 @@ kbd {
   border-style: dashed;
 }
 
-/* 종료 — 사각형 */
+/* 작업 끝 — 빨간 점. 프롬프트로 돌아왔고 더 이상 기다릴 것이 없다 */
+.status-dot.is-idle .status-core {
+  background: var(--done);
+}
+
+/*
+ * 셸이 죽음 — 회색 빈 원.
+ *
+ * 종료는 상태가 아니라 부재다. 신호등의 세 색 어디에도 넣지 않는다 — 빨강을
+ * 나눠 쓰면 "작업이 끝났다"와 "세션이 사라졌다"가 한 색으로 뭉개진다.
+ */
 .status-dot.is-exited .status-core {
-  border-radius: 2px;
-  background: var(--text-faint);
+  border: 1.5px solid var(--text-faint);
+  background: transparent;
 }
 
 /* 미읽음 알림 배지 */
@@ -635,19 +653,19 @@ kbd {
   box-shadow: inset 0 0 0 1px #33425c;
 }
 
-/* 에이전트가 기다리는 패널에 파란 링. P4-1 */
+/* 에이전트가 기다리는 패널에 노란 링. P4-1 */
 .pane.is-attention::after {
   content: '';
   position: absolute;
   inset: 2px;
-  border: 1px solid rgb(122 162 247 / 45%);
+  border: 1px solid rgb(224 175 104 / 45%);
   border-radius: 8px;
   pointer-events: none;
 }
 
 .pane.is-attention.is-certain::after {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 22px -12px var(--accent);
+  border-color: var(--waiting);
+  box-shadow: inset 0 0 22px -12px var(--waiting);
 }
 
 .pane-terminal {

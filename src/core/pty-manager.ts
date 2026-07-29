@@ -56,6 +56,12 @@ function psBootstrap(keepScreen: boolean): string {
  * 이스케이프 시퀀스를 prompt의 **반환 문자열**에 담는 것도 의도적이다. PSReadLine은
  * 프롬프트를 그린 뒤 커서 위치로 폭을 재므로, 폭이 0인 OSC는 계산을 어긋내지
  * 않는다 — VS Code와 Windows Terminal이 쓰는 방식이다.
+ *
+ * `PSConsoleHostReadLine` 훅을 prompt 안에서 거는 이유도 순서 때문이다. PSReadLine은
+ * 대화형 REPL이 시작될 때 로드되는데, 이 스크립트는 `-EncodedCommand`로 그보다
+ * **먼저** 실행된다. 바깥에서 한 번만 확인하면 함수가 아직 없어 훅을 놓치고,
+ * 명령 시작(133;C)을 영영 알 수 없게 된다. 프롬프트가 처음 그려질 때는 이미
+ * 로드된 뒤이므로 그때 건다.
  */
 const SHELL_INTEGRATION = `
 if (-not $global:__cvmuxShellIntegration) {
@@ -63,6 +69,15 @@ if (-not $global:__cvmuxShellIntegration) {
   $global:__cvmuxPrompt = $function:prompt
   function global:prompt {
     $body = (& $global:__cvmuxPrompt) -join ''
+    if (-not $global:__cvmuxReadLineHooked -and (Test-Path Function:\\PSConsoleHostReadLine)) {
+      $global:__cvmuxReadLineHooked = $true
+      $global:__cvmuxReadLine = $function:PSConsoleHostReadLine
+      function global:PSConsoleHostReadLine {
+        $line = & $global:__cvmuxReadLine
+        [Console]::Write("$([char]27)]133;C$([char]7)")
+        $line
+      }
+    }
     $e = [char]27
     $b = [char]7
     $cwd = ''
@@ -72,14 +87,6 @@ if (-not $global:__cvmuxShellIntegration) {
       $cwd = "$e]7;file:///$p$b"
     }
     "$e]133;D$b$e]133;A$b$cwd$body$e]133;B$b"
-  }
-  if (Test-Path Function:\\PSConsoleHostReadLine) {
-    $global:__cvmuxReadLine = $function:PSConsoleHostReadLine
-    function global:PSConsoleHostReadLine {
-      $line = & $global:__cvmuxReadLine
-      [Console]::Write("$([char]27)]133;C$([char]7)")
-      $line
-    }
   }
 }
 `.trim()

@@ -14,6 +14,47 @@ export function shortenPath(fullPath: string): string {
   return isUnc ? `\\\\…\\${tail}` : `…\\${tail}`
 }
 
+/** 표시용으로 경로 표기를 하나로 맞춘다 — 끝의 구분자를 떼고 전부 역슬래시로 */
+function normalizePath(value: string): string {
+  return value.replace(/[\\/]+$/, '').replace(/\//g, '\\')
+}
+
+/**
+ * 저장소 루트에서 cwd까지의 상대 경로. 루트 자신이거나 밖이면 null (P13-12).
+ *
+ * Windows 경로는 대소문자를 가리지 않으므로 비교도 그래야 한다. 표시에는
+ * 셸이 알려준 원래 표기를 그대로 쓴다 — 비교 때문에 사용자가 친 대소문자를
+ * 바꿔 보여줄 이유는 없다.
+ */
+export function repoRelativePath(root: string | null, cwd: string): string | null {
+  if (!root) return null
+  const base = normalizePath(root)
+  const here = normalizePath(cwd)
+  if (here.toLowerCase() === base.toLowerCase()) return null
+  if (!here.toLowerCase().startsWith(`${base.toLowerCase()}\\`)) return null
+  return here.slice(base.length + 1)
+}
+
+/**
+ * "어디인가"에 답하는 한 줄 (P19-1 / P19-7).
+ *
+ * 저장소 이름만 적으면 `cd`로 하위 폴더에 들어간 것이 사이드바에 전혀
+ * 드러나지 않는다 — 움직였는데 화면이 그대로면 추적이 고장 난 것처럼 보인다.
+ * 저장소 안에서는 루트로부터의 상대 경로를 뒤에 붙여 지금 선 자리를 적는다.
+ */
+export function whereLabel(session: SessionMeta): string {
+  const { git, cwd } = session
+  if (!git) return shortenPath(cwd)
+
+  const relative = repoRelativePath(git.root, cwd)
+  if (relative === null) return git.repo
+
+  // 깊이 들어갔으면 끝의 두 단계만 — 한 줄에 들어가야 읽힌다. P11-3
+  const parts = relative.split('\\')
+  const tail = parts.length > 2 ? `…\\${parts.slice(-2).join('\\')}` : relative
+  return `${git.repo}\\${tail}`
+}
+
 /** 종료된 세션의 배지 문구. P1-1 ~ P1-3 */
 export function exitLabel(session: SessionMeta): string | null {
   if (session.status !== 'exited') return null

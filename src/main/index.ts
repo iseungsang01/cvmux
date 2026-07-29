@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
@@ -160,6 +160,46 @@ function setAutoStart(enabled: boolean): void {
   })
 }
 
+/** 사용자가 자동 시작을 직접 켜거나 껐다는 기록. 있으면 그 뜻을 따른다 */
+function autoStartChoicePath(): string {
+  return join(app.getPath('userData'), 'autostart.json')
+}
+
+function autoStartChosen(): boolean {
+  return existsSync(autoStartChoicePath())
+}
+
+function rememberAutoStartChoice(enabled: boolean): void {
+  try {
+    writeFileSync(autoStartChoicePath(), JSON.stringify({ enabled }), 'utf8')
+  } catch (error) {
+    // 기록하지 못하면 다음 실행에서 기본값을 한 번 더 적용할 뿐이다
+    console.warn('[cvmux] 자동 시작 설정을 남기지 못했습니다:', error)
+  }
+}
+
+/**
+ * 자동 시작은 켜진 채로 시작한다 (P20-13).
+ *
+ * "컴퓨터를 껐다 켜도 세션이 그대로"가 되려면 로그인 시점에 데몬이 서 있어야
+ * 한다. 앱을 열어야만 복원된다면 그건 세션이 유지된 것이 아니라 앱이 뒤늦게
+ * 되살린 것이다.
+ *
+ * 다만 켜는 것은 **한 번뿐이다**. 사용자가 트레이에서 끄면 그 선택을 기록하고
+ * 다시는 되돌리지 않는다 — 매번 다시 켜지는 것은 설정이 아니라 고집이다.
+ */
+function applyDefaultAutoStart(): void {
+  if (!autoStartAvailable() || autoStartChosen()) return
+  setAutoStart(true)
+  rememberAutoStartChoice(true)
+  console.log('[cvmux] 로그인 시 세션을 미리 준비하도록 설정했습니다 (트레이 메뉴에서 끌 수 있습니다)')
+}
+
+/** 지금까지의 세션 상태를 데몬이 디스크에 남기게 한다. P20-14 */
+function persistSessions(): void {
+  void daemon?.call(RPC.PERSIST).catch(() => undefined)
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1360,
@@ -224,7 +264,13 @@ function createWindow(): void {
      *
      * 트레이로 물러날 뿐이다. 확인 대화상자를 띄우지 않는다 — 아무것도
      * 죽지 않으니 물을 것이 없다.
+     *
+     * 다만 여기서 한 번 남긴다. 창을 닫은 뒤 그대로 전원을 내리는 것은
+     * 아주 흔한 순서이고, 그때 주기 저장을 기다리면 마지막 작업 디렉토리와
+     * 화면이 사라진다(P20-14).
      */
+    persistSessions()
+
     if (tray) {
       event.preventDefault()
       win.hide()
@@ -289,6 +335,10 @@ if (!daemonOnly && !app.requestSingleInstanceLock()) {
 
     // 이걸 설정하지 않으면 Windows가 토스트를 조용히 무시한다. P15-8
     app.setAppUserModelId('com.cvmux.app')
+
+    // 처음 실행이라면 로그인 시 자동 시작을 켠다. 재부팅 뒤에도 세션이 제자리에
+    // 있으려면 데몬이 로그인 시점에 서 있어야 한다. P20-13
+    applyDefaultAutoStart()
 
     daemon = await connectDaemon()
 
@@ -358,7 +408,16 @@ if (!daemonOnly && !app.requestSingleInstanceLock()) {
       closeApp,
       quitAll,
       sessionCount: () => sessionCount,
-      autoStart: autoStartAvailable() ? { enabled: autoStartEnabled, set: setAutoStart } : null
+      autoStart: autoStartAvailable()
+        ? {
+            enabled: autoStartEnabled,
+            // 사용자가 직접 고른 값은 기억한다 — 다음 실행에서 기본값이 덮어쓰지 않도록. P20-13
+            set: (value: boolean) => {
+              setAutoStart(value)
+              rememberAutoStartChoice(value)
+            }
+          }
+        : null
     })
     if (!tray) {
       console.warn('[cvmux] 트레이를 만들지 못했습니다. 창을 닫으면 앱이 종료됩니다. P18-6')
@@ -388,6 +447,9 @@ app.on('before-quit', () => {
   if (cleaningUp) return
   cleaningUp = true
   quitting = true
+
+  // 앱이 나가도 세션은 남는다. 남는 것들의 지금 모습을 확실히 적어둔다. P20-14
+  persistSessions()
 
   tray?.destroy()
   tray = null

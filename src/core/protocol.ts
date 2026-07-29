@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto'
  * 데몬을 물러나게 하고 자기 짝을 새로 띄운다 — 낡은 데몬과 새 앱이 말이
  * 통하는 척하다 엉키는 것보다 낫다.
  */
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 
 /**
  * 파이프 이름은 상태 디렉토리에서 나온다 (P20-8).
@@ -68,6 +68,14 @@ export const RPC = {
   BUSY_COUNT: 'busyCount',
   LOAD_LAYOUT: 'loadLayout',
   SAVE_LAYOUT: 'saveLayout',
+  /**
+   * 지금 상태를 디스크에 남긴다 (P20-14).
+   *
+   * 주기 저장만 믿으면 창을 닫은 직후 전원을 내렸을 때 마지막 몇십 초가
+   * 사라진다. 앱이 물러나는 순간처럼 "여기까지는 확실히 남겨야 하는" 지점에서
+   * 부른다.
+   */
+  PERSIST: 'persist',
   /** 데몬을 완전히 끝낸다 — 세션도 함께 정리된다. P20-6 */
   SHUTDOWN: 'shutdown'
 } as const

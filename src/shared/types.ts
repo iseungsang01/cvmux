@@ -23,6 +23,13 @@ export interface GitInfo {
    * 답하는 값이라 경로보다 이것이 먼저 온다. worktree면 그 worktree의 이름. P13-11
    */
   repo: string
+  /**
+   * 작업 트리 루트의 절대 경로. bare 저장소에는 없으므로 null.
+   *
+   * 저장소 이름만으로는 `cd`로 하위 폴더에 들어간 것이 사이드바에 드러나지
+   * 않는다. 루트를 알아야 "저장소 안 어디에 서 있는가"를 적을 수 있다. P13-12
+   */
+  root: string | null
   /** 브랜치명, detached면 짧은 커밋 해시. P13-3 */
   branch: string
   detached: boolean

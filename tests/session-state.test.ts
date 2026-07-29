@@ -20,14 +20,21 @@ function check(name: string, ok: boolean, detail = ''): void {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-function make(): { s: SessionState; notes: string[] } {
+function make(): { s: SessionState; notes: string[]; cwds: string[] } {
   const notes: string[] = []
+  const cwds: string[] = []
   const s = new SessionState({
     onChange: () => {},
     onNotify: (t) => notes.push(t),
-    onCwd: () => {}
+    onCwd: (cwd) => cwds.push(cwd)
   })
-  return { s, notes }
+  return { s, notes, cwds }
+}
+
+/** 셸 통합이 매 프롬프트마다 내보내는 시퀀스 (pty-manager.ts의 SHELL_INTEGRATION과 같은 모양) */
+function promptSequence(windowsPath: string, body: string): string {
+  const url = windowsPath.replace(/\\/g, '/')
+  return `\x1b]133;D\x07\x1b]133;A\x07\x1b]7;file:///${url}\x07${body}\x1b]133;B\x07`
 }
 
 const IDLE_WAIT = 550
@@ -126,6 +133,67 @@ async function main(): Promise<void> {
       s.status === 'attention' && notes[0] === 'Claude: 확인이 필요합니다',
       `${s.status} / ${JSON.stringify(notes)}`
     )
+    s.dispose()
+  }
+
+  /*
+   * ── P13-7 / P3-9: 셸에서 `cd`를 치면 작업 디렉토리가 따라와야 한다
+   *
+   * 이게 끊기면 사이드바가 세션이 시작한 자리에 영원히 머문다 — 사용자에게는
+   * "cd를 쳤는데 반영이 안 된다"로 보인다. 실제로 그렇게 보고된 적이 있다.
+   */
+  {
+    const { s, cwds } = make()
+    s.ingest(
+      promptSequence(
+        'C:\\Users\\lss\\Documents\\GitHub\\cvmux',
+        'PS C:\\Users\\lss\\Documents\\GitHub\\cvmux> '
+      )
+    )
+    check(
+      'P3-9 OSC 7 → cwd 보고',
+      cwds[0] === 'C:\\Users\\lss\\Documents\\GitHub\\cvmux',
+      JSON.stringify(cwds)
+    )
+
+    // cd 뒤의 새 프롬프트가 새 자리를 알린다
+    s.ingest(promptSequence('C:\\Windows\\System32', 'PS C:\\Windows\\System32> '))
+    check('P13-7 cd 후 새 cwd 보고', cwds[1] === 'C:\\Windows\\System32', JSON.stringify(cwds))
+
+    // 셸 통합이 살아 있으면 프롬프트 판정은 정규식이 아니라 133 마커를 따른다
+    await sleep(IDLE_WAIT)
+    check(
+      'P3-9 셸 통합이면 idle 판정이 확실해진다',
+      s.status === 'idle' && s.confidence === 'certain',
+      `${s.status}/${s.confidence}`
+    )
+    s.dispose()
+  }
+
+  // ── P3-2: OSC 7이 청크 경계에 걸려도 놓치지 않는다
+  {
+    const { s, cwds } = make()
+    const seq = promptSequence('C:\\Users\\lss\\Documents\\GitHub\\cvmux\\src\\core', 'PS> ')
+    const cut = seq.indexOf('file:///') + 12
+    s.ingest(seq.slice(0, cut))
+    s.ingest(seq.slice(cut))
+    check(
+      'P3-2 경계에 걸린 OSC 7도 온전히 파싱',
+      cwds[0] === 'C:\\Users\\lss\\Documents\\GitHub\\cvmux\\src\\core',
+      JSON.stringify(cwds)
+    )
+    s.dispose()
+  }
+
+  // ── 133;C(명령 시작) → busy, 133;D(명령 종료) → idle. 둘 다 확실한 신호다
+  {
+    const { s } = make()
+    s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
+    s.ingest('\x1b]133;C\x07')
+    check('P3-9 133;C → busy(확실)', s.status === 'busy' && s.confidence === 'certain', s.status)
+    // 명령이 오래 돌아도 유휴 타이머가 idle로 되돌리지 못한다
+    await sleep(IDLE_WAIT)
+    check('P3-9 실행 중에는 idle로 새지 않는다', s.status === 'busy', s.status)
     s.dispose()
   }
 
