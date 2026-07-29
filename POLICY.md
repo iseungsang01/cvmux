@@ -70,6 +70,7 @@ Windows의 PTY는 ConPTY다. macOS의 `forkpty`와 동작이 다르며, 여기�
 | P3-7 | 런처가 `NO_COLOR`를 켠 채 cvmux를 실행 | 세션 환경에서 **`NO_COLOR`를 제거한다**. cvmux 세션은 트루컬러를 완전히 지원하는 새 터미널이고, 앱을 띄운 부모 프로세스의 색상 정책이 세션 안으로 새어들 이유가 없다. 실제로 다른 에이전트 CLI 안에서 cvmux를 띄우면 그 CLI가 심어둔 `NO_COLOR=1` 때문에 모든 하위 CLI가 흑백이 된다. 색을 원치 않으면 `CVMUX_NO_COLOR=1`로 명시한다 | `pty-manager.ts` |
 | P3-8 | `TERM=dumb` 상속 | 마찬가지로 세션에서는 `xterm-256color`로 덮어쓴다. 터미널의 능력은 세션이 결정한다 | 동일 |
 | P3-9 | 셸이 작업 디렉토리·프롬프트 경계를 알려주지 않음 | 세션 시작 시 프로필의 `prompt`를 **감싸** OSC 7(작업 디렉토리)과 OSC 133(셸 통합)을 심는다. 프로필 파일은 건드리지 않는다. 원본 `prompt`를 가장 먼저 호출해 `$?`/`$LASTEXITCODE`를 온전히 넘긴다 — 순서가 반대면 실패를 색으로 알리는 테마가 전부 성공한 것처럼 보인다. `CVMUX_NO_SHELL_INTEGRATION=1`로 끌 수 있다 | `pty-manager.ts` |
+| P3-10 | 세션에서 Electron 앱이 창 대신 Node로 뜸 | 데몬은 Electron 실행 파일을 `ELECTRON_RUN_AS_NODE=1`로 다시 부른 프로세스이므로(P20-2), 그 변수를 지우고 세션을 띄운다. 그대로 물려주면 세션 안에서 실행한 **모든** Electron 앱이 GUI 대신 Node로 뜬다 — VS Code도, cvmux 설치본도. `cvmux.exe: bad option: ...`으로 나타난다 | 동일 |
 
 ---
 
