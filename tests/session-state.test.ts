@@ -253,12 +253,51 @@ async function main(): Promise<void> {
     const { s } = make()
     s.ingest('\x1b[?1049h')
     s.ingest('~\r\n~\r\n"file.txt" 3L, 42B')
+    check('P4-9 alt screen 안에서 그리는 동안은 busy', s.status === 'busy' && s.altScreen, s.status)
+
+    // 화면이 멎으면 TUI도 사용자를 기다리는 중이다 — 초록을 유지하지 않는다
     await sleep(IDLE_WAIT)
-    check('P4-9 alt screen 안에서는 busy 고정', s.status === 'busy' && s.altScreen, s.status)
+    check(
+      'P4-9 alt screen 안에서도 조용하면 waiting',
+      s.status === 'waiting' && s.confidence === 'inferred' && s.altScreen,
+      `${s.status}/${s.confidence}`
+    )
+
     s.ingest('\x1b[?1049l')
     s.ingest('PS C:\\Users\\lss> ')
     await sleep(IDLE_WAIT)
     check('P4-9 alt screen 이탈 후 재개', s.status === 'idle' && !s.altScreen, s.status)
+    s.dispose()
+  }
+
+  /*
+   * ── P4-9 / P4-14: alt screen을 쓰는 에이전트 CLI를 띄워두면 초록이 안 꺼졌다
+   *
+   * 실제로 보고된 증상이다 — "채팅도 안 쳤는데 9개 세션이 전부 초록이다".
+   * claude는 시작하자마자 `?1049h`로 대체 화면에 들어가 실행 내내 머문다.
+   * 그래서 P4-14를 셸 통합 경로에만 적용했을 때, alt screen 분기가 그보다
+   * 먼저 걸려 판정을 통째로 가로챘다. 두 경로 모두 "조용하면 waiting"이어야
+   * 한다는 것을 이 시나리오로 고정한다.
+   */
+  {
+    const { s } = make()
+    s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
+    s.ingest('\x1b]133;C\x07') // claude 실행 — 명령은 몇 시간이고 살아 있다
+    s.ingest('\x1b[?1049h') // 곧바로 대체 화면 진입
+    s.ingest('\x1b[?25l\x1b[36;1H✻ thinking\x1b[39;3H\x1b[?25h')
+    check('P4-14 에이전트가 화면을 그리는 동안은 busy', s.status === 'busy', s.status)
+
+    // 사용자가 아무것도 치지 않아 출력이 멎었다
+    await sleep(IDLE_WAIT)
+    check(
+      'P4-14 alt screen 에이전트가 조용하면 초록이 꺼진다',
+      s.status === 'waiting' && s.altScreen,
+      `${s.status}/${s.confidence}`
+    )
+
+    // 답이 오기 시작하면 다시 초록
+    s.ingest('\x1b[36;1H✻ 답을 쓰는 중')
+    check('P4-14 출력이 재개되면 busy', s.status === 'busy', s.status)
     s.dispose()
   }
 
