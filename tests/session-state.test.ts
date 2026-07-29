@@ -191,9 +191,43 @@ async function main(): Promise<void> {
     s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
     s.ingest('\x1b]133;C\x07')
     check('P3-9 133;C → busy(확실)', s.status === 'busy' && s.confidence === 'certain', s.status)
-    // 명령이 오래 돌아도 유휴 타이머가 idle로 되돌리지 못한다
+    s.dispose()
+  }
+
+  /*
+   * ── P4-14: 에이전트를 띄워둔 채 아무 일도 일어나지 않으면 busy가 아니다
+   *
+   * 실제로 보고된 증상이다 — "claude 켜놓고 아무것도 안 하는데 초록이다".
+   * 셸 통합이 켜져 있으면 명령이 살아 있는 동안 commandRunning이 참으로 남는데,
+   * 그것만 보고 busy를 유지하면 초록 점이 영영 꺼지지 않는다.
+   */
+  {
+    const { s } = make()
+    s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
+    s.ingest('\x1b]133;C\x07') // claude 시작
+    s.ingest('무언가 출력하는 중...\r\n')
+    check('P4-14 출력이 흐르는 동안은 busy', s.status === 'busy', s.status)
+
+    // 출력이 멎었다 — 명령은 아직 살아 있지만 조용하다
     await sleep(IDLE_WAIT)
-    check('P3-9 실행 중에는 idle로 새지 않는다', s.status === 'busy', s.status)
+    check(
+      'P4-14 떠 있는 채로 조용하면 waiting',
+      s.status === 'waiting' && s.confidence === 'certain',
+      `${s.status}/${s.confidence}`
+    )
+
+    // 다시 출력이 흐르면 busy로 돌아온다
+    s.ingest('다시 일을 시작한다\r\n')
+    check('P4-14 출력이 재개되면 busy', s.status === 'busy', s.status)
+
+    // 명령이 끝나 프롬프트로 돌아오면 빈손 상태
+    s.ingest(promptSequence('C:\\Users\\lss', 'PS C:\\Users\\lss> '))
+    await sleep(IDLE_WAIT)
+    check(
+      'P4-14 프롬프트로 돌아오면 idle',
+      s.status === 'idle' && s.confidence === 'certain',
+      `${s.status}/${s.confidence}`
+    )
     s.dispose()
   }
 

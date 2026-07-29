@@ -161,13 +161,13 @@ function TerminalPane({
     else host.refit(session.id)
   }, [visible, focused, host, session.id])
 
-  const attention = session.status === 'attention' || session.status === 'waiting'
+  // 사이드바와 같은 기준 — 명시적 신호에만 테두리를 두른다. P4-14
+  const attention = session.status === 'attention'
   const classes = [
     'pane',
     focused ? 'is-focused' : '',
-    // 에이전트가 기다리는 pane에 파란 링. P4-1
-    attention ? 'is-attention' : '',
-    session.status === 'attention' ? 'is-certain' : ''
+    // 에이전트가 명시적으로 부른 pane에 노란 링. P4-1
+    attention ? 'is-attention' : ''
   ]
     .filter(Boolean)
     .join(' ')

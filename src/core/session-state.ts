@@ -290,9 +290,20 @@ export class SessionState {
       return
     }
 
-    // 셸이 OSC 133을 보내면 그것이 정규식보다 정확하다
+    /*
+     * 셸이 OSC 133을 보내면 그것이 정규식보다 정확하다.
+     *
+     * 다만 "명령이 떠 있다"와 "무언가 진행 중이다"는 다르다. 에이전트 CLI를
+     * 띄워두면 명령은 몇 시간이고 살아 있으므로, commandRunning만 보고 busy를
+     * 유지하면 초록 점이 영영 꺼지지 않는다 — 정작 일이 돌아갈 때와 구분되지
+     * 않아 신호가 통째로 죽는다. 출력이 멎었으면 조용한 것이다(P4-14).
+     */
     if (this.shellIntegration) {
-      this.set(this.commandRunning ? 'busy' : 'idle', 'certain')
+      if (!this.commandRunning) {
+        this.set('idle', 'certain')
+        return
+      }
+      this.set('waiting', 'certain')
       return
     }
 

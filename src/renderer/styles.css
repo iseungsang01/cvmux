@@ -208,6 +208,18 @@ kbd {
   color: var(--text-faint);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+  transition: opacity 120ms ease;
+}
+
+/*
+ * 줄에 손이 닿으면 인덱스를 비켜준다.
+ *
+ * 이름 바꾸기·닫기 버튼이 같은 자리에 겹쳐 올라와 숫자를 가로지른다. 인덱스는
+ * `Ctrl+Alt+숫자`로 건너뛰라는 힌트인데, 마우스를 올린 순간은 이미 손이 다른
+ * 길을 고른 뒤다 — 그때까지 붙들고 있을 이유가 없다.
+ */
+.session-row:hover .session-index {
+  opacity: 0;
 }
 
 /* pane이 여럿인 워크스페이스 표시. P17 */
@@ -343,13 +355,12 @@ kbd {
   color: var(--busy);
 }
 
-.session-status.is-attention,
-.session-status.is-waiting {
+.session-status.is-attention {
   color: var(--waiting);
 }
 
-/* 작업이 끝나 프롬프트로 돌아왔다 — 왼쪽 빨간 점과 같은 말을 한다 */
-.session-status.is-idle {
+/* 떠 있는 채로 조용하다 — 왼쪽 빨간 점과 같은 말을 한다. P4-14 */
+.session-status.is-waiting {
   color: var(--done);
 }
 
@@ -362,6 +373,38 @@ kbd {
   color: #ffc777;
   font-size: 11px;
   white-space: normal;
+}
+
+/*
+ * 이름 바꾸기 — 보이는 진입점 (P19-3).
+ *
+ * 닫기 버튼과 같은 자리, 같은 규칙을 따른다. 평소에는 숨어 있다가 줄에
+ * 손이 닿을 때 함께 나타난다 — 항상 떠 있으면 한 줄에 담긴 정보를 가린다(P19-1).
+ */
+.session-rename {
+  position: absolute;
+  top: 6px;
+  right: 26px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.session-row:hover .session-rename {
+  opacity: 1;
+}
+
+.session-rename:hover {
+  background: var(--bg-row);
+  color: var(--text);
 }
 
 .session-close {
@@ -428,48 +471,51 @@ kbd {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
-/* 답을 기다리는 중 — 노란 점. 입력 대기(추정)와 확인 필요(확실)가 같은 뜻이다 */
-.status-dot.is-waiting .status-core,
+/* 확인 필요 — 노란 점 + 퍼지는 링. 무언가 명시적으로 나를 불렀다 */
 .status-dot.is-attention .status-core {
   background: var(--waiting);
 }
 
-.status-dot.is-waiting::after,
 .status-dot.is-attention::after {
   content: '';
   position: absolute;
   inset: 0;
   border: 1.5px solid var(--waiting);
   border-radius: 50%;
-}
-
-.status-dot.is-attention::after {
   animation: ring 1.8s ease-out infinite;
 }
 
-/* 추측으로 판정한 상태는 옅게 — 확실한 신호와 구분한다. P0-3 */
-.status-dot.is-inferred.is-waiting .status-core {
-  background: transparent;
-}
-
-.status-dot.is-inferred.is-waiting::after {
-  border-style: dashed;
-}
-
-/* 작업 끝 — 빨간 점. 프롬프트로 돌아왔고 더 이상 기다릴 것이 없다 */
-.status-dot.is-idle .status-core {
+/*
+ * 떠 있는 채로 조용함 — 빨간 점 (P4-14).
+ *
+ * 에이전트를 띄워두고 아무 일도 일어나지 않는 상태가 여기다. 일을 끝냈거나
+ * 답을 기다리거나 둘 중 하나인데, 어느 쪽이든 사용자가 볼 차례라는 뜻은 같다.
+ */
+.status-dot.is-waiting .status-core {
   background: var(--done);
 }
 
+/* 추측으로 판정했으면 옅게 — 확실한 신호와 구분한다. P0-3 */
+.status-dot.is-inferred.is-waiting .status-core {
+  border: 1.5px solid var(--done);
+  background: transparent;
+}
+
 /*
- * 셸이 죽음 — 회색 빈 원.
+ * 셸 프롬프트 — 회색 빈 원.
  *
- * 종료는 상태가 아니라 부재다. 신호등의 세 색 어디에도 넣지 않는다 — 빨강을
- * 나눠 쓰면 "작업이 끝났다"와 "세션이 사라졌다"가 한 색으로 뭉개진다.
+ * 아무 명령도 돌지 않는 빈손 상태다. 신호등의 세 색 어디에도 넣지 않는다 —
+ * 색을 주면 "볼 것이 없다"가 "볼 것이 있다"처럼 보인다.
  */
-.status-dot.is-exited .status-core {
+.status-dot.is-idle .status-core {
   border: 1.5px solid var(--text-faint);
   background: transparent;
+}
+
+/* 셸이 죽음 — 회색 사각. 상태가 아니라 부재이므로 모양부터 다르다 */
+.status-dot.is-exited .status-core {
+  border-radius: 2px;
+  background: var(--text-faint);
 }
 
 /* 미읽음 알림 배지 */
@@ -653,19 +699,15 @@ kbd {
   box-shadow: inset 0 0 0 1px #33425c;
 }
 
-/* 에이전트가 기다리는 패널에 노란 링. P4-1 */
+/* 에이전트가 명시적으로 부른 패널에 노란 링. P4-1 */
 .pane.is-attention::after {
   content: '';
   position: absolute;
   inset: 2px;
-  border: 1px solid rgb(224 175 104 / 45%);
+  border: 1px solid var(--waiting);
   border-radius: 8px;
-  pointer-events: none;
-}
-
-.pane.is-attention.is-certain::after {
-  border-color: var(--waiting);
   box-shadow: inset 0 0 22px -12px var(--waiting);
+  pointer-events: none;
 }
 
 .pane-terminal {

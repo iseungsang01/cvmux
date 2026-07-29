@@ -24,6 +24,7 @@ type Shortcut =
   | { kind: 'new' }
   | { kind: 'close' }
   | { kind: 'sidebar' }
+  | { kind: 'rename' }
   | { kind: 'split'; direction: 'row' | 'column' }
   | { kind: 'select'; index: number }
 
@@ -36,6 +37,14 @@ function matchShortcut(event: KeyboardEvent): Shortcut | null {
         return { kind: 'close' }
       case 'KeyB':
         return { kind: 'sidebar' }
+      /*
+       * 이름 바꾸기 (P19-3).
+       *
+       * Windows 관례인 F2가 아니라 Ctrl+Shift+E를 쓴다. PSReadLine이 F2를
+       * 예측 뷰 전환에 쓰고 있고, 셸이 실제로 쓰는 키는 가로채지 않는다(P6-1).
+       */
+      case 'KeyE':
+        return { kind: 'rename' }
       default:
         return null
     }
@@ -66,6 +75,8 @@ export function App(): JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 이름을 고치고 있는 워크스페이스. 단축키가 바깥에서 편집을 열 수 있어야 한다. P19-3 */
+  const [renamingId, setRenamingId] = useState<string | null>(null)
 
   // 이벤트 핸들러가 오래된 클로저를 붙잡지 않도록 최신 값을 ref로 들고 다닌다
   const activeIdRef = useRef<string | null>(null)
@@ -277,6 +288,11 @@ export function App(): JSX.Element {
     void window.cvmux.saveLayout(workspaces)
   }, [workspaces])
 
+  // 편집하던 줄이 사라졌다 — 열린 편집기를 닫는다
+  useEffect(() => {
+    if (renamingId !== null && !workspaces.some((w) => w.id === renamingId)) setRenamingId(null)
+  }, [workspaces, renamingId])
+
   // ── 활성 워크스페이스 유지 ───────────────────────────────────
   useEffect(() => {
     if (activeId !== null && workspaces.some((w) => w.id === activeId)) return
@@ -321,6 +337,11 @@ export function App(): JSX.Element {
           break
         case 'sidebar':
           setSidebarCollapsed((v) => !v)
+          break
+        case 'rename':
+          // 사이드바가 접혀 있으면 편집할 줄이 보이지 않는다 — 먼저 펼친다
+          setSidebarCollapsed(false)
+          setRenamingId(activeIdRef.current)
           break
         case 'split':
           void splitFocused(shortcut.direction)
@@ -424,6 +445,9 @@ export function App(): JSX.Element {
           onCreate={() => void createWorkspace()}
           onDismissError={() => setError(null)}
           onRename={renameWorkspace}
+          renamingId={renamingId}
+          onRenameStart={setRenamingId}
+          onRenameEnd={() => setRenamingId(null)}
         />
 
         <main className="main">

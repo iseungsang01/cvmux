@@ -86,20 +86,21 @@ export function splitPorts(ports: number[]): { shown: number[]; extra: number } 
 }
 
 /**
- * 사이드바에 그대로 적히는 상태 문구 (P19-2).
+ * 사이드바에 그대로 적히는 상태 문구 (P19-2 / P19-6).
  *
- * `idle`을 그냥 "대기"라고 쓰면 `waiting`("입력 대기")과 눈으로 구분되지 않는다.
- * 둘은 전혀 다른 상황이다 — 하나는 셸이 다음 명령을 기다리는 평온한 상태이고,
- * 다른 하나는 무언가가 사용자의 답을 기다리는 중일지도 모르는 상태다.
+ * `idle`과 `waiting`은 눈으로 구분되어야 한다. 둘 다 "조용하다"지만 전혀 다른
+ * 상황이다 — `idle`은 셸이 빈손으로 다음 명령을 기다리는 것이고, `waiting`은
+ * 무언가가 **떠 있는 채로** 조용한 것이다. 후자가 곧 에이전트를 띄워두고
+ * 아무 일도 일어나지 않는 상태다.
  */
 export function statusLabel(session: SessionMeta): string {
   switch (session.status) {
     case 'busy':
       return session.altScreen ? '전체화면 앱' : '실행 중'
     case 'idle':
-      return '프롬프트 대기'
+      return '셸 프롬프트'
     case 'waiting':
-      return '입력 대기 (추정)'
+      return '대기 중'
     case 'attention':
       return '확인 필요'
     case 'exited':
