@@ -292,11 +292,20 @@ async function shutdown(reason: string): Promise<void> {
   // 세션을 정리하기 전에 마지막으로 남긴다 — disposeAll이 목록을 비운다. P16-1
   persistNow()
 
-  for (const socket of clients) socket.destroy()
-  clients.clear()
+  // 새 연결은 더 받지 않는다. 붙어 있는 쪽은 정리가 끝날 때까지 그대로 둔다
   server.close()
 
   await manager.disposeAll()
+
+  /*
+   * 다 치운 뒤에 끊는다 (P20-15).
+   *
+   * 연결이 끊기는 순간이 곧 "프로세스 트리까지 정리했다"는 신호가 된다.
+   * 설치 프로그램은 이 신호를 기다렸다가 실행 파일을 덮어쓴다 — 먼저 끊고
+   * 나서 치우면, 아직 셸이 살아 있는데 다 끝난 것처럼 보인다.
+   */
+  for (const socket of clients) socket.destroy()
+  clients.clear()
   process.exit(0)
 }
 

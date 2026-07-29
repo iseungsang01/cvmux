@@ -26,6 +26,25 @@ import { createTray, type TrayController } from './tray'
  */
 const daemonOnly = process.argv.includes('--daemon-only')
 
+/**
+ * 설치 프로그램이 자리를 비워달라고 부르는 길 (P20-15).
+ *
+ * 데몬은 설치 폴더의 cvmux.exe를 다시 부른 프로세스라, 살아 있는 동안에는
+ * Windows가 그 파일을 잠근다 — 그래서 새 버전을 덮어쓸 수 없다. 억지로 죽이면
+ * 세션의 프로세스 트리가 고아로 남고 마지막 화면도 저장되지 않으므로, 설치가
+ * 시작되기 전에 앱과 데몬이 순서대로 스스로 물러난다.
+ *
+ * 창도 트레이도 만들지 않는다. 없는 데몬을 새로 세우지도 않는다.
+ *
+ * 설치 프로그램은 `--daemon-only`도 함께 넘긴다. 이 인자를 모르는 예전 빌드가
+ * 창을 띄운 채 설치를 멈춰 세우지 않게 하려는 장치다(`build/installer.nsh`).
+ * 그래서 이쪽 판정이 `--daemon-only`보다 먼저 와야 한다.
+ */
+const quitDaemon = process.argv.includes('--quit-daemon')
+
+/** 데몬이 세션을 정리하고 나갈 때까지 기다려 주는 시간. 넘기면 설치 프로그램이 강제로 정리한다 */
+const QUIT_DAEMON_TIMEOUT_MS = 15_000
+
 /** 토스트를 클릭하면 창을 깨우고 그 세션으로 전환한다. P15-5 / P18-2 */
 const notifier = new Notifier((sessionId) => {
   showWindow()
@@ -309,16 +328,73 @@ async function connectDaemon(): Promise<DaemonClient | null> {
   }
 }
 
-// ── 기동 ─────────────────────────────────────────────────────
+/**
+ * 설치 전에 앱과 데몬을 순서대로 물러나게 한다 (P20-15).
+ *
+ * 데몬을 먼저 재우면 떠 있던 창이 "연결이 끊겼습니다" 대화상자를 띄운 채
+ * 설치를 가로막는다. 그래서 창부터 내보내고, 그 앱이 마지막 상태를 남기고
+ * 나갈 틈을 준 뒤에 데몬에게 정리를 맡긴다.
+ */
+async function stepAsideForInstaller(appWasRunning: boolean): Promise<void> {
+  if (appWasRunning) {
+    console.log('[cvmux] 실행 중인 창에 종료를 요청했습니다')
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+  }
 
-// 데몬만 세우는 실행은 락을 잡지 않는다. 곧 물러날 프로세스가 락을 쥐면
-// 뒤이어 실행된 진짜 앱이 창을 띄우지 못한다
-if (!daemonOnly && !app.requestSingleInstanceLock()) {
+  const client = new DaemonClient({
+    entry: join(__dirname, 'daemon.js'),
+    stateDir: app.getPath('userData')
+  })
+
+  if (!(await client.connectExisting())) {
+    console.log('[cvmux] 돌고 있는 데몬이 없습니다')
+    return
+  }
+
+  try {
+    await client.call(RPC.SHUTDOWN)
+  } catch {
+    // 응답을 받지 못해도 상관없다 — 이미 나가는 중일 수 있다
+  }
+  // 세션 프로세스 트리를 다 정리하고 소켓을 끊을 때까지 기다린다
+  await client.waitForClose(QUIT_DAEMON_TIMEOUT_MS)
+  console.log('[cvmux] 데몬이 세션을 정리하고 물러났습니다')
+}
+
+// ── 기동 ─────────────────────────────────────────────────────
+//
+// 창을 띄우지 않는 두 실행(`--daemon-only`, `--quit-daemon`)은 단일 인스턴스
+// 락을 두고 다투지 않는다. 곧 물러날 프로세스가 락을 쥐면 뒤이어 실행된 진짜
+// 앱이 창을 띄우지 못한다.
+
+if (quitDaemon) {
+  /*
+   * 락을 잡으려는 시도 자체가 신호다. 이미 앱이 떠 있으면 락을 얻지 못하고,
+   * 그쪽의 second-instance 핸들러가 우리 argv를 보고 스스로 물러난다.
+   */
+  const appWasRunning = !app.requestSingleInstanceLock()
+
+  // 어떤 이유로든 매달리면 설치 프로그램이 통째로 멈춘다. 그럴 바에는 나간다
+  setTimeout(() => app.exit(0), QUIT_DAEMON_TIMEOUT_MS + 5000).unref()
+
+  void app.whenReady().then(async () => {
+    await stepAsideForInstaller(appWasRunning)
+    app.exit(0)
+  })
+} else if (!daemonOnly && !app.requestSingleInstanceLock()) {
   // 두 번째 인스턴스는 기존 창을 깨우고 스스로 종료한다. P10-4
   app.quit()
 } else {
-  // 트레이에 숨어 있을 때 바로가기를 다시 눌러도 창이 돌아와야 한다. P10-4 / P18-5
-  app.on('second-instance', showWindow)
+  app.on('second-instance', (_event, argv) => {
+    // 설치 프로그램이 보낸 인스턴스다 — 창을 깨우는 대신 자리를 비운다. P20-15
+    if (argv.includes('--quit-daemon')) {
+      console.log('[cvmux] 설치를 위해 앱을 종료합니다')
+      closeApp()
+      return
+    }
+    // 트레이에 숨어 있을 때 바로가기를 다시 눌러도 창이 돌아와야 한다. P10-4 / P18-5
+    showWindow()
+  })
 
   void app.whenReady().then(async () => {
     if (!conPtySupported()) {

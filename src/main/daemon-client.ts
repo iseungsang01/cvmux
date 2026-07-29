@@ -77,6 +77,41 @@ export class DaemonClient extends EventEmitter {
     await this.ensureConnection()
   }
 
+  /**
+   * 이미 돌고 있는 데몬에만 붙는다 (P20-15).
+   *
+   * 없으면 없는 것이다 — 재우러 온 길에 새로 세우면, 설치 프로그램이 방금
+   * 비운 자리를 우리가 다시 붙잡는 꼴이 된다.
+   */
+  async connectExisting(): Promise<boolean> {
+    if (this.connected) return true
+    try {
+      this.attach(await openPipe(this.options.stateDir))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 연결이 끊길 때까지 기다린다.
+   *
+   * 데몬은 세션 프로세스 트리를 다 정리한 뒤에야 소켓을 끊는다. 그래서 이
+   * 신호는 "치우는 중"이 아니라 "다 치웠다"는 뜻이다(P20-15).
+   */
+  waitForClose(timeoutMs: number): Promise<void> {
+    if (!this.connected) return Promise.resolve()
+    return new Promise((resolve) => {
+      const finish = (): void => {
+        clearTimeout(timer)
+        this.off('disconnect', finish)
+        resolve()
+      }
+      const timer = setTimeout(finish, timeoutMs)
+      this.once('disconnect', finish)
+    })
+  }
+
   private async ensureConnection(): Promise<void> {
     if (this.connected) return
 
