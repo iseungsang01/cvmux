@@ -12,6 +12,15 @@ function isPasteChord(event: KeyboardEvent): boolean {
 }
 
 /**
+ * 한 터미널이 WebGL 컨텍스트를 다시 잡아 보는 횟수의 상한 (P5-10).
+ *
+ * 브라우저가 컨텍스트를 회수하는 상황은 대개 컨텍스트가 모자란 상황이다.
+ * 그런 자리에서 무한정 다시 잡으려 들면 잡자마자 또 잃는 일이 되풀이되므로,
+ * 몇 번 겪은 터미널은 DOM 렌더러에 눌러앉힌다 — 느릴지언정 멀쩡히 그린다.
+ */
+const MAX_CONTEXT_LOSSES = 2
+
+/**
  * xterm 인스턴스의 수명을 React 바깥에서 관리한다 (P5-1).
  *
  * 세션을 전환할 때 인스턴스를 버리면 스크롤백과 커서 위치가 함께 사라진다.
@@ -66,6 +75,10 @@ interface Entry {
   /** 재생 데이터를 붙이기 전에 도착한 실시간 출력. 순서를 지키려고 큐에 담는다. P9-1 / P0-2 */
   queue: string[] | null
   cleanup: Array<() => void>
+  /** 지금 화면에 보이는가 — WebGL 컨텍스트를 쥘 자격의 기준이다. P5-10 */
+  visible: boolean
+  /** WebGL 컨텍스트를 잃은 횟수. 상한에 닿으면 다시 잡지 않는다. P5-10 */
+  contextLosses: number
 }
 
 export class TerminalHost {
@@ -88,7 +101,8 @@ export class TerminalHost {
     if (!entry.opened) {
       entry.term.open(container)
       entry.opened = true
-      this.enableWebgl(entry)
+      // WebGL은 보이는 터미널만 쥔다 — 붙이는 일은 setVisible이 맡는다. P5-10
+      if (entry.visible) this.enableWebgl(entry)
       this.bindPaste(entry, container)
     } else if (entry.term.element && entry.term.element.parentElement !== container) {
       container.appendChild(entry.term.element)
@@ -155,6 +169,26 @@ export class TerminalHost {
     if (entry) this.scheduleFit(entry)
   }
 
+  /**
+   * 이 세션이 화면에 보이는지 알린다 (P5-10).
+   *
+   * 세션마다 WebGL 컨텍스트를 하나씩 쥐고 있으면, 보이지도 않는 워크스페이스의
+   * 터미널들이 GPU 메모리를 그대로 붙들고 있게 된다. 게다가 브라우저가 한 번에
+   * 살려두는 컨텍스트 수에는 상한이 있어서, 세션을 여닫다 보면 오래된 것부터
+   * 조용히 회수당한다 — 그 터미널은 그때부터 느린 DOM 렌더러로 떨어진다.
+   *
+   * 그래서 컨텍스트는 보이는 터미널에게만 준다. xterm 인스턴스 자체는 그대로
+   * 살아 있으므로(P5-1) 스크롤백도 커서도 잃지 않고, 다시 보일 때 컨텍스트만
+   * 새로 잡는다.
+   */
+  setVisible(id: string, visible: boolean): void {
+    const entry = this.entries.get(id)
+    if (!entry || entry.visible === visible) return
+    entry.visible = visible
+    if (visible) this.enableWebgl(entry)
+    else this.releaseWebgl(entry)
+  }
+
   dispose(id: string): void {
     const entry = this.entries.get(id)
     if (!entry) return
@@ -162,7 +196,7 @@ export class TerminalHost {
     if (entry.fitTimer !== null) window.clearTimeout(entry.fitTimer)
     entry.observer?.disconnect()
     for (const fn of entry.cleanup) fn()
-    entry.webgl?.dispose()
+    this.releaseWebgl(entry)
     entry.term.dispose()
   }
 
@@ -216,7 +250,9 @@ export class TerminalHost {
       rows: 0,
       status: 'busy',
       queue: [],
-      cleanup: []
+      cleanup: [],
+      visible: false,
+      contextLosses: 0
     }
 
     const dataSub = term.onData((data) => {
@@ -258,17 +294,34 @@ export class TerminalHost {
 
   /** WebGL 렌더러. 실패나 컨텍스트 손실은 조용히 DOM 렌더러로 폴백한다. P5-2 / P5-3 */
   private enableWebgl(entry: Entry): void {
+    // 아직 열리지 않았거나, 이미 쥐고 있거나, 너무 여러 번 잃은 터미널은 건너뛴다. P5-10
+    if (!entry.opened || entry.webgl || entry.contextLosses >= MAX_CONTEXT_LOSSES) return
+
     try {
       const webgl = new WebglAddon()
       webgl.onContextLoss(() => {
-        webgl.dispose()
-        entry.webgl = null
+        entry.contextLosses += 1
+        this.releaseWebgl(entry)
+        /*
+         * 보이는 중에 잃었다면 다시 잡아 본다 (P5-10).
+         *
+         * 예전에는 여기서 손을 놓아, 한 번 회수당한 터미널이 남은 수명 내내
+         * DOM 렌더러로 남았다. 상한이 되풀이를 막아주므로 시도해도 안전하다.
+         */
+        if (entry.visible) this.enableWebgl(entry)
       })
       entry.term.loadAddon(webgl)
       entry.webgl = webgl
     } catch {
       entry.webgl = null
     }
+  }
+
+  /** 컨텍스트를 놓아준다. 렌더러는 xterm 기본값으로 돌아간다. P5-10 */
+  private releaseWebgl(entry: Entry): void {
+    if (!entry.webgl) return
+    entry.webgl.dispose()
+    entry.webgl = null
   }
 
   /**

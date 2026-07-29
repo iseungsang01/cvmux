@@ -153,6 +153,11 @@ function TerminalPane({
     void host.hydrate(session.id)
   }, [host, session.id])
 
+  // 보이지 않는 워크스페이스의 터미널은 WebGL 컨텍스트를 놓아준다. P5-10
+  useEffect(() => {
+    host.setVisible(session.id, visible)
+  }, [host, session.id, visible])
+
   // 보이게 되거나 포커스를 받은 순간에만 크기를 맞춘다. 숨은 상태의 fit은
   // 1×1 터미널을 만든다. P2-3 / P17-6
   useEffect(() => {
