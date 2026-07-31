@@ -11,6 +11,11 @@ function isPasteChord(event: KeyboardEvent): boolean {
   return event.ctrlKey && !event.altKey && !event.metaKey && event.code === 'KeyV'
 }
 
+/** Ctrl+C — 선택이 있을 때만 복사다. 없으면 셸의 인터럽트. P6-1 */
+function isCopyChord(event: KeyboardEvent): boolean {
+  return event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.code === 'KeyC'
+}
+
 /**
  * 한 터미널이 WebGL 컨텍스트를 다시 잡아 보는 횟수의 상한 (P5-10).
  *
@@ -269,6 +274,23 @@ export class TerminalHost {
       if (this.callbacks.isAppShortcut(event)) return false
 
       /*
+       * Ctrl+C는 선택이 있을 때만 복사다 (P6-1).
+       *
+       * 복사한 뒤 선택을 지우는 것이 핵심이다 — 그래야 이어서 누른 Ctrl+C가
+       * 평소처럼 셸의 인터럽트로 내려간다. Windows Terminal과 같은 손버릇이다.
+       * 선택이 없거나 공백뿐이면 아무것도 가로채지 않고 그대로 흘려보낸다.
+       */
+      if (isCopyChord(event)) {
+        const selection = entry.term.getSelection()
+        if (selection) {
+          event.preventDefault()
+          entry.term.clearSelection()
+          void this.copySelection(selection)
+          return false
+        }
+      }
+
+      /*
        * 붙여넣기는 우리가 처리한다 (P7-4).
        *
        * `preventDefault`가 반드시 필요하다. 핸들러가 `false`를 돌려주는 것은
@@ -348,11 +370,17 @@ export class TerminalHost {
       /*
        * 텍스트가 없는 클립보드 — 이미지만 들어 있는 경우다 (P7-5).
        *
-       * 터미널은 이미지를 실어 나를 수 없다. 대신 `Ctrl+V`를 원래 모습(0x16)
-       * 그대로 흘려보내, 안에서 도는 프로그램이 스스로 클립보드를 읽게 한다.
-       * Claude Code 같은 에이전트 CLI가 스크린샷을 첨부하는 길이 이것이다.
+       * 터미널은 이미지를 실어 나를 수 없다. 대신 붙여넣기 키를 흘려보내,
+       * 안에서 도는 프로그램이 스스로 클립보드를 읽게 한다. Claude Code 같은
+       * 에이전트 CLI가 스크린샷을 첨부하는 길이 이것이다.
+       *
+       * 보내는 것은 `Ctrl+V`의 원래 모습(`0x16`)이 아니라 `Alt+V`(`ESC`+`v`)다.
+       * Windows에서는 터미널이 Ctrl+V를 텍스트 붙여넣기로 가져가는 것이 관례라,
+       * 에이전트 CLI들이 이미지 첨부를 Alt+V에 걸어 두었다 — Claude Code는
+       * Windows·WSL에서만 `alt+v`를 쓰고, 그 밖의 플랫폼에서 `ctrl+v`를 쓴다.
+       * `0x16`을 보내면 이 플랫폼에서는 아무 일도 일어나지 않는다.
        */
-      this.callbacks.onInput(entry.id, '\x16')
+      this.callbacks.onInput(entry.id, '\x1bv')
       return
     }
 
@@ -363,6 +391,15 @@ export class TerminalHost {
     }
     // bracketed paste와 개행 정규화는 xterm이 맡는다. P7-1 / P7-2
     entry.term.paste(content.text)
+  }
+
+  /** 선택 영역을 클립보드에 넣는다. 렌더러는 샌드박스라 main을 거친다. P6-1 */
+  private async copySelection(text: string): Promise<void> {
+    try {
+      await window.cvmux.writeClipboard(text)
+    } catch {
+      // 클립보드를 못 썼다 — 선택은 이미 지워졌고, 더 할 일은 없다
+    }
   }
 
   /** 대용량 붙여넣기만 가로챈다. 그 아래 크기는 xterm이 bracketed paste·CRLF까지 알아서 처리한다. P7 */

@@ -135,6 +135,13 @@ export function registerIpc(daemon: DaemonClient, notifier: Notifier): void {
     return { text, hasImage: text ? false : !clipboard.readImage().isEmpty() }
   })
 
+  // 선택 영역 복사. 빈 문자열로 클립보드를 지우지는 않는다. P6-1
+  ipcMain.handle(IPC.WRITE_CLIPBOARD, (_event, text: unknown) => {
+    if (typeof text !== 'string' || !text) return false
+    clipboard.writeText(text)
+    return true
+  })
+
   // 대용량 붙여넣기 확인. P7-3
   ipcMain.handle(IPC.CONFIRM_PASTE, async (event, bytes: unknown) => {
     if (typeof bytes !== 'number' || bytes < POLICY.PASTE_CONFIRM_BYTES) return true

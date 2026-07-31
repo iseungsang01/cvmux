@@ -153,6 +153,8 @@ export const IPC = {
   CONFIRM_PASTE: 'app:confirm-paste',
   /** 클립보드 내용 조회 — 렌더러는 샌드박스라 직접 읽을 수 없다. P7-4 */
   READ_CLIPBOARD: 'app:read-clipboard',
+  /** 선택 영역 복사 — 읽기와 같은 이유로 main을 거친다. P6-1 */
+  WRITE_CLIPBOARD: 'app:write-clipboard',
   /** 어떤 세션을 보고 있는지 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2 */
   SET_ACTIVE: 'app:set-active',
   /** pane 배치 저장/복원. P16 / P17 */
@@ -182,6 +184,8 @@ export interface CvmuxApi {
   markRead(id: string): Promise<boolean>
   confirmPaste(bytes: number): Promise<boolean>
   readClipboard(): Promise<ClipboardContent>
+  /** 선택한 텍스트를 클립보드에 넣는다. P6-1 */
+  writeClipboard(text: string): Promise<boolean>
   setActive(id: string | null): Promise<boolean>
   /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
   loadLayout(): Promise<Workspace[]>
