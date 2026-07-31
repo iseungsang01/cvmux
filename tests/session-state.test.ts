@@ -8,6 +8,7 @@
  *
  * 실행: npm test
  */
+import { POLICY } from '@shared/policy'
 import { SessionState } from '../src/core/session-state'
 
 const results: string[] = []
@@ -37,7 +38,9 @@ function promptSequence(windowsPath: string, body: string): string {
   return `\x1b]133;D\x07\x1b]133;A\x07\x1b]7;file:///${url}\x07${body}\x1b]133;B\x07`
 }
 
-const IDLE_WAIT = 550
+const IDLE_WAIT = POLICY.IDLE_THRESHOLD_MS + 150
+/** 대체 화면의 유휴 문턱은 더 길다. P4-16 */
+const ALT_IDLE_WAIT = POLICY.ALT_SCREEN_IDLE_MS + 150
 
 async function main(): Promise<void> {
   // ── P4-7: 프롬프트로 끝나면 idle
@@ -256,7 +259,7 @@ async function main(): Promise<void> {
     check('P4-9 alt screen 안에서 그리는 동안은 busy', s.status === 'busy' && s.altScreen, s.status)
 
     // 화면이 멎으면 TUI도 사용자를 기다리는 중이다 — 초록을 유지하지 않는다
-    await sleep(IDLE_WAIT)
+    await sleep(ALT_IDLE_WAIT)
     check(
       'P4-9 alt screen 안에서도 조용하면 waiting',
       s.status === 'waiting' && s.confidence === 'inferred' && s.altScreen,
@@ -288,7 +291,7 @@ async function main(): Promise<void> {
     check('P4-14 에이전트가 화면을 그리는 동안은 busy', s.status === 'busy', s.status)
 
     // 사용자가 아무것도 치지 않아 출력이 멎었다
-    await sleep(IDLE_WAIT)
+    await sleep(ALT_IDLE_WAIT)
     check(
       'P4-14 alt screen 에이전트가 조용하면 초록이 꺼진다',
       s.status === 'waiting' && s.altScreen,
@@ -298,6 +301,30 @@ async function main(): Promise<void> {
     // 답이 오기 시작하면 다시 초록
     s.ingest('\x1b[36;1H✻ 답을 쓰는 중')
     check('P4-14 출력이 재개되면 busy', s.status === 'busy', s.status)
+    s.dispose()
+  }
+
+  /*
+   * ── P4-16: 서브에이전트가 도는 동안 신호등이 깜빡이면 안 된다
+   *
+   * 실제로 보고된 증상이다 — "subagent가 돌면 flickering이 자주 보인다".
+   * 에이전트 TUI는 서브에이전트에 위임한 동안 스피너·경과 시간을 약 1초
+   * 간격으로만 다시 그린다. 400ms 문턱은 그 사이 침묵마다 빨강을 켜서
+   * 점이 1Hz로 깜빡였다. 대체 화면의 문턱은 그 갱신 주기보다 길어야 한다.
+   */
+  {
+    const { s } = make()
+    s.ingest('\x1b[?1049h')
+    s.ingest('\x1b[36;1H✳ 서브에이전트 3개 실행 중 (12s)')
+    // 스피너 갱신 사이의 침묵 — 옛 문턱(400ms)보다 길고 갱신 주기(1초)와 같다
+    for (let i = 0; i < 3; i++) {
+      await sleep(1000)
+      check(`P4-16 스피너 갱신 사이(${i + 1})에도 초록 유지`, s.status === 'busy', s.status)
+      s.ingest(`\x1b[36;1H✳ 서브에이전트 3개 실행 중 (${13 + i}s)`)
+    }
+    // 진짜로 멎으면 그때는 꺼진다
+    await sleep(ALT_IDLE_WAIT)
+    check('P4-16 진짜 침묵에는 초록이 꺼진다', s.status === 'waiting', s.status)
     s.dispose()
   }
 
@@ -312,7 +339,7 @@ async function main(): Promise<void> {
     const { s } = make()
     s.ingest('\x1b[?1049h')
     s.ingest('\x1b[36;1H> ')
-    await sleep(IDLE_WAIT)
+    await sleep(ALT_IDLE_WAIT)
     check('P4-15 준비: 조용한 에이전트는 waiting', s.status === 'waiting', s.status)
 
     // 사용자가 한 글자씩 친다 — 셸이 입력 줄을 다시 그린다

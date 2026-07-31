@@ -283,10 +283,13 @@ export class SessionState {
 
   private armIdle(): void {
     this.clearIdle()
+    // 대체 화면 TUI는 일하는 동안에도 ~1초 간격으로만 그린다 — 문턱이 그보다
+    // 짧으면 갱신 사이 침묵마다 신호등이 깜빡인다. P4-16
+    const threshold = this.altScreen ? POLICY.ALT_SCREEN_IDLE_MS : POLICY.IDLE_THRESHOLD_MS
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
       this.evaluateIdle()
-    }, POLICY.IDLE_THRESHOLD_MS)
+    }, threshold)
   }
 
   private clearIdle(): void {
@@ -314,7 +317,8 @@ export class SessionState {
      * 않는다. 게다가 이 분기가 셸 통합 분기보다 먼저 걸려서 P4-14의 판정 자체가
      * 무의미해진다.
      *
-     * 여기까지 왔다는 것은 이미 400ms 동안 아무것도 그려지지 않았다는 뜻이다.
+     * 여기까지 왔다는 것은 이미 유휴 문턱만큼(대체 화면에서는 2초 — P4-16)
+     * 아무것도 그려지지 않았다는 뜻이다.
      * 전체화면 TUI가 화면을 멈췄으면 그리는 일이 끝난 것이고, 남은 것은
      * 사용자 차례다. vim도 htop도 같다 — 편집 중이면 키마다 출력이 흐르고,
      * 주기적으로 갱신하는 화면은 계속 busy로 남는다. P4-9 / P4-14
