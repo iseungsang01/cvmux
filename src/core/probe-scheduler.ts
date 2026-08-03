@@ -13,7 +13,7 @@ import type { GitInfo } from '@shared/types'
  *   - 조사 자체는 워커에게 맡긴다(P14-12).
  *
  * 마지막 항목이 핵심이다. 프로세스 생성은 부르는 스레드의 이벤트 루프를
- * 붙잡으므로, 데몬의 메인 루프에서 돌리면 그 동안 PTY 입출력이 멎는다.
+ * 붙잡으므로, 메인 프로세스의 이벤트 루프에서 돌리면 그 동안 PTY 입출력이 멎는다.
  * 여기서는 타이머와 결과 반영만 맡고, 실제 조사는 `probe-worker`가 한다.
  */
 
@@ -43,7 +43,7 @@ export interface ProbeResult {
   patches: Array<{ id: string; patch: ProbePatch }>
 }
 
-/** 데몬 진입점 옆에 나란히 빌드된다 */
+/** 메인 프로세스 진입점 옆에 나란히 빌드된다 */
 const WORKER_ENTRY = join(__dirname, 'probe-worker.js')
 
 /**
@@ -177,7 +177,7 @@ export class ProbeScheduler {
 
     try {
       const worker = new Worker(WORKER_ENTRY)
-      // 조사가 데몬의 수명을 붙잡지 않게 한다 — 세션이 주인이다
+      // 조사가 앱의 수명을 붙잡지 않게 한다 — 세션이 주인이다
       worker.unref()
       worker.on('message', (result: ProbeResult) => this.settle(result))
       // 이미 교체된 워커의 뒤늦은 이벤트는 무시한다

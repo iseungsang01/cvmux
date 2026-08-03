@@ -17,14 +17,10 @@ import { Menu, Tray, app, nativeImage, type NativeImage } from 'electron'
 export interface TrayHandlers {
   /** 창을 되살린다 */
   show(): void
-  /** 앱만 닫는다. 세션은 데몬에 남아 계속 돈다. P20-1 */
-  closeApp(): void
-  /** 세션까지 모두 정리하고 끝낸다. 실행 중 세션 확인은 호출자가 한다. P18-4 */
-  quitAll(): void
+  /** 앱을 완전히 끝낸다. 실행 중 세션 확인은 호출자가 한다 */
+  quit(): void
   /** 메뉴와 툴팁에 표시할 현재 세션 수 */
   sessionCount(): number
-  /** 로그인 자동 시작 토글. 쓸 수 없는 환경(개발 중 등)이면 null. P20-11 */
-  autoStart: { enabled(): boolean; set(value: boolean): void } | null
 }
 
 export interface TrayController {
@@ -71,8 +67,6 @@ export function createTray(handlers: TrayHandlers): TrayController | null {
     const count = handlers.sessionCount()
     const label = count === 0 ? '열려 있는 세션 없음' : `세션 ${count}개`
 
-    const { autoStart } = handlers
-
     tray.setToolTip(`cvmux — ${label}`)
     tray.setContextMenu(
       Menu.buildFromTemplate([
@@ -81,30 +75,7 @@ export function createTray(handlers: TrayHandlers): TrayController | null {
         // 상태를 알리는 줄이지 누를 것이 아니다
         { label, enabled: false },
         { type: 'separator' },
-        // 켜두면 로그인 직후 세션이 제자리를 잡아둔다. P20-11
-        ...(autoStart
-          ? ([
-              {
-                label: '로그인할 때 세션 미리 준비',
-                type: 'checkbox' as const,
-                checked: autoStart.enabled(),
-                click: (item: { checked: boolean }) => {
-                  autoStart.set(item.checked)
-                  refresh()
-                }
-              },
-              { type: 'separator' as const }
-            ] as const)
-          : []),
-        /*
-         * 끝내는 방법을 두 갈래로 나눈다 (P20-6).
-         *
-         * 창을 치우는 것과 작업을 끝내는 것은 다른 결정이다. 하나로 묶어두면
-         * 잠깐 정리하려던 사람이 돌던 빌드까지 함께 날린다. 무엇이 사라지고
-         * 무엇이 남는지 메뉴 문구에 그대로 적는다.
-         */
-        { label: '창 닫기 (세션은 계속 실행)', click: () => handlers.closeApp() },
-        { label: '세션까지 모두 종료', click: () => handlers.quitAll() }
+        { label: 'cvmux 종료', click: () => handlers.quit() }
       ])
     )
   }

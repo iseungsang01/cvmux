@@ -501,16 +501,6 @@ function buildEnv(sessionId: string): Record<string, string> {
   env.COLORTERM = 'truecolor'
 
   /*
-   * 데몬이 자기를 띄우는 데 쓴 스위치를 세션에 물려주지 않는다 (P3-10).
-   *
-   * 데몬은 Electron 실행 파일을 `ELECTRON_RUN_AS_NODE=1`로 다시 부른
-   * 프로세스다(P20-2). 그 변수가 그대로 상속되면 세션 안에서 실행한 모든
-   * Electron 앱이 — VS Code도, cvmux 설치본도 — 창 대신 Node로 뜬다.
-   * 실제로 `cvmux.exe: bad option: --quit-daemon`으로 나타난다.
-   */
-  delete env.ELECTRON_RUN_AS_NODE
-
-  /*
    * 런처의 색상 정책이 세션으로 새어들지 않게 한다 (P3-7).
    *
    * 다른 에이전트 CLI 안에서 cvmux를 띄우면 그 CLI가 자식 셸에 심어둔

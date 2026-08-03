@@ -14,9 +14,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
-          // 세션을 들고 있는 데몬. Electron이 아니라 ELECTRON_RUN_AS_NODE로 돈다. P20
-          daemon: resolve(__dirname, 'src/daemon/index.ts'),
-          // 데몬이 워커로 띄운다 — 조사가 메인 루프를 막지 않게. P14-12
+          // 메인 프로세스가 워커로 띄운다 — 조사가 메인 루프를 막지 않게. P14-12
           'probe-worker': resolve(__dirname, 'src/core/probe-worker.ts')
         }
       }
