@@ -65,6 +65,22 @@ export function render(command: string, result: unknown, json: boolean): string 
     case 'sidebar-state':
       return JSON.stringify(result, null, 2)
 
+    // 상태 이름만으로는 무엇을 해야 하는지 알기 어렵다 — 다음 행동을 함께 적는다
+    case 'update': {
+      const status = String(value.status ?? '')
+      const version = value.version ? ` (${String(value.version)})` : ''
+      const notes: Record<string, string> = {
+        idle: '아직 확인하지 않았습니다',
+        checking: '확인 중입니다',
+        current: '최신 버전입니다',
+        downloading: `내려받는 중${version} — ${String(value.percent ?? 0)}%`,
+        ready: `설치할 준비가 됐습니다${version}. \`cvmux update install\` 또는 트레이 메뉴에서.`,
+        error: `확인하지 못했습니다: ${String(value.error ?? '')}`,
+        disabled: `자동 확인이 꺼져 있습니다${value.error ? ` (${String(value.error)})` : ''}`
+      }
+      return notes[status] ?? summarize(value)
+    }
+
     case 'tree':
       return rows(value.workspaces)
         .map((w) => `${w.ref}  ${w.title}\n${drawTree(w.tree, '  ')}`)

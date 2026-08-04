@@ -150,6 +150,25 @@ export interface WorkspaceMeta {
   todo: TodoItem[]
 }
 
+/**
+ * 자동 업데이트 상태 (P26).
+ *
+ * - `idle`        아직 확인하지 않았다
+ * - `checking`    확인 중
+ * - `current`     최신이다
+ * - `downloading` 새 버전을 내려받는 중 (`percent`)
+ * - `ready`       내려받았다. 다음에 끝낼 때 설치된다
+ * - `error`       확인이나 내려받기가 실패했다 — 앱의 실패가 아니다
+ * - `disabled`    개발 빌드이거나 설정에서 껐다
+ */
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'error' | 'disabled'
+  version: string | null
+  notes: string | null
+  error: string | null
+  percent: number
+}
+
 /** 오른쪽 사이드바가 지금 무엇을 보여주는가. P25-7 */
 export type RightSidebarMode = 'log' | 'todo' | 'sessions' | 'find'
 
@@ -253,6 +272,10 @@ export const IPC = {
   CTL_REPLY: 'ctl:reply',
   /** 설정. P22 */
   CONFIG: 'config:get',
+  /** 자동 업데이트. P26 */
+  UPDATE_STATE: 'update:state',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_INSTALL: 'update:install',
   /** 워크스페이스 메타데이터. P25 */
   WORKSPACE_META: 'meta:get',
   TODO_SET_STATE: 'meta:todo-state',
@@ -290,7 +313,9 @@ export const IPC = {
   /** 워크스페이스 메타데이터가 바뀌었다. P25 */
   EVT_WORKSPACE_META: 'evt:workspace-meta',
   /** 소켓이 오른쪽 사이드바를 열라고 한다. P25-7 */
-  EVT_RIGHT_SIDEBAR: 'evt:right-sidebar'
+  EVT_RIGHT_SIDEBAR: 'evt:right-sidebar',
+  /** 업데이트 상태가 바뀌었다. P26 */
+  EVT_UPDATE: 'evt:update'
 } as const
 
 /** 주소창 버튼이 보내는 것들. P23-1 */
@@ -349,6 +374,11 @@ export interface CvmuxApi {
   /** 지금 적용된 설정. P22 */
   config(): Promise<CvmuxConfig>
 
+  /** 자동 업데이트. P26 */
+  updateState(): Promise<UpdateState>
+  updateCheck(): Promise<UpdateState>
+  updateInstall(): Promise<boolean>
+
   /** 워크스페이스 메타데이터. P25 */
   workspaceMeta(): Promise<Record<string, WorkspaceMeta>>
   todoAdd(workspaceId: string, text: string): Promise<boolean>
@@ -382,4 +412,5 @@ export interface CvmuxApi {
   onBrowser(cb: (meta: BrowserMeta) => void): () => void
   onWorkspaceMeta(cb: (meta: Record<string, WorkspaceMeta>) => void): () => void
   onRightSidebar(cb: (state: { open: boolean; mode: RightSidebarMode }) => void): () => void
+  onUpdate(cb: (state: UpdateState) => void): () => void
 }

@@ -7,6 +7,7 @@ import type {
   Notification,
   RightSidebarMode,
   SessionMeta,
+  UpdateState,
   Workspace,
   WorkspaceMeta
 } from '@shared/types'
@@ -65,6 +66,14 @@ export function App(): JSX.Element {
   const [rightSidebar, setRightSidebar] = useState<{ open: boolean; mode: RightSidebarMode }>({
     open: false,
     mode: 'log'
+  })
+  /** 자동 업데이트 상태. P26 */
+  const [update, setUpdate] = useState<UpdateState>({
+    status: 'idle',
+    version: null,
+    notes: null,
+    error: null,
+    percent: 0
   })
   const [find, setFind] = useState<{
     open: boolean
@@ -673,6 +682,12 @@ export function App(): JSX.Element {
     setFind((prev) => ({ ...prev, open: true, scope, index: 0, count: 0 }))
   }, [])
 
+  // ── 자동 업데이트 (P26) ──────────────────────────────────────
+  useEffect(() => {
+    void window.cvmux.updateState().then(setUpdate)
+    return window.cvmux.onUpdate(setUpdate)
+  }, [])
+
   // ── 사이드바 메타데이터 (P25) ────────────────────────────────
   useEffect(() => {
     void window.cvmux.workspaceMeta().then(setWorkspaceMeta)
@@ -892,6 +907,22 @@ export function App(): JSX.Element {
         run: () => void openBrowser('about:blank').catch(() => undefined)
       },
       {
+        id: 'update.check',
+        title:
+          update.status === 'ready'
+            ? `업데이트 설치 (${update.version ?? '새 버전'})`
+            : update.status === 'downloading'
+              ? `업데이트 내려받는 중 ${update.percent}%`
+              : '업데이트 확인',
+        keywords: 'update upgrade version check install',
+        section: '앱',
+        run: () => {
+          // 준비됐으면 설치가, 아니면 확인이 지금 할 일이다
+          if (update.status === 'ready') void window.cvmux.updateInstall()
+          else void window.cvmux.updateCheck().then(setUpdate)
+        }
+      },
+      {
         id: 'view.right-sidebar',
         title: rightSidebar.open ? '오른쪽 사이드바 닫기' : '오른쪽 사이드바',
         keywords: 'right sidebar log todo panel',
@@ -940,6 +971,7 @@ export function App(): JSX.Element {
     sessionMap,
     rightSidebar.open,
     sidebarCollapsed,
+    update,
     splitFocused,
     workspaces
   ])
@@ -1071,6 +1103,23 @@ export function App(): JSX.Element {
           잃는다. 종은 항상 자리를 지켜서, 눌러 볼 곳이 있다는 사실 자체는
           사라지지 않는다.
         */}
+        {/*
+          업데이트가 준비됐을 때만 뜬다 (P26-2).
+
+          대화상자로 막아서지 않는다 — 하던 일을 끊지 않는 것이 이 기능의
+          전제다. 누르면 그때 물어본다.
+        */}
+        {update.status === 'ready' && (
+          <button
+            type="button"
+            className="titlebar-update"
+            onClick={() => void window.cvmux.updateInstall()}
+            title={`${update.version ?? '새 버전'} 설치 — 앱이 다시 시작합니다`}
+          >
+            업데이트 준비됨
+          </button>
+        )}
+
         <button
           type="button"
           className={`icon-button titlebar-bell${unreadCount > 0 ? ' is-unread' : ''}`}

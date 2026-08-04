@@ -215,6 +215,11 @@ export const M = {
   /** 오른쪽 사이드바. cmux의 `right-sidebar`에 해당. P25-7 */
   RIGHT_SIDEBAR: 'right-sidebar',
 
+  /** 자동 업데이트 (P26) */
+  UPDATE_STATE: 'update.state',
+  UPDATE_CHECK: 'update.check',
+  UPDATE_INSTALL: 'update.install',
+
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',
   /** 설정 파일을 다시 읽는다. P22-6 */

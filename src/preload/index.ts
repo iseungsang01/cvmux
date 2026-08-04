@@ -14,6 +14,7 @@ import {
   type SessionExitInfo,
   type SessionMeta,
   type SessionSnapshot,
+  type UpdateState,
   type Workspace,
   type WorkspaceMeta
 } from '@shared/types'
@@ -58,6 +59,9 @@ const api: CvmuxApi = {
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
   config: () => ipcRenderer.invoke(IPC.CONFIG) as Promise<CvmuxConfig>,
+  updateState: () => ipcRenderer.invoke(IPC.UPDATE_STATE) as Promise<UpdateState>,
+  updateCheck: () => ipcRenderer.invoke(IPC.UPDATE_CHECK) as Promise<UpdateState>,
+  updateInstall: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL) as Promise<boolean>,
   workspaceMeta: () =>
     ipcRenderer.invoke(IPC.WORKSPACE_META) as Promise<Record<string, WorkspaceMeta>>,
   todoAdd: (workspaceId, text) =>
@@ -92,7 +96,8 @@ const api: CvmuxApi = {
   onWorkspaceMeta: (cb) =>
     subscribe<[Record<string, WorkspaceMeta>]>(IPC.EVT_WORKSPACE_META, cb),
   onRightSidebar: (cb) =>
-    subscribe<[{ open: boolean; mode: RightSidebarMode }]>(IPC.EVT_RIGHT_SIDEBAR, cb)
+    subscribe<[{ open: boolean; mode: RightSidebarMode }]>(IPC.EVT_RIGHT_SIDEBAR, cb),
+  onUpdate: (cb) => subscribe<[UpdateState]>(IPC.EVT_UPDATE, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

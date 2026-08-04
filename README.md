@@ -320,6 +320,34 @@ cvmux browser screenshot        # PNG를 base64로
 창이 뒤에 가려져도 페이지는 계속 돈다 — 이 화면을 조종하는 것은 대개 뒤에서
 도는 에이전트이기 때문이다.
 
+## 업데이트
+
+설치본은 GitHub 릴리스를 보고 스스로 갱신한다. 시작 20초 뒤에 한 번, 그 뒤로는
+6시간마다 확인하고, 새 버전이 있으면 **조용히 내려받기만** 한다.
+
+설치는 직접 눌러야 한다. 타이틀바의 "업데이트 준비됨" 또는 트레이 메뉴에서
+고르면, 실행 중인 세션이 몇 개인지 함께 보여주고 물어본다. 몇 시간짜리 세션이
+떠 있는 앱이 알아서 다시 켜지면 안 되기 때문이다.
+
+```powershell
+cvmux update status     # 지금 상태
+cvmux update check      # 지금 확인 (자동 확인을 꺼 두었어도 동작한다)
+cvmux update install    # 준비된 것을 설치 — 앱이 종료된다
+```
+
+자동 확인을 끄려면 `cvmux.json`에:
+
+```jsonc
+{ "update": { "enabled": false } }
+```
+
+**새 버전 내는 법** — 태그를 밀면 CI가 설치 파일과 `latest.yml`을 릴리스에 올린다.
+
+```powershell
+npm version patch          # package.json을 올리고 v0.1.1 태그를 만든다
+git push --follow-tags
+```
+
 ## 설정
 
 `%APPDATA%\cvmux\cvmux.json`을 읽는다(`~/.config/cvmux/cvmux.json`도 본다).

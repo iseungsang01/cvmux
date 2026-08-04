@@ -2,6 +2,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 
 import type { NotificationStore } from '@core/notifications'
 import type { WorkspaceMetaStore } from '@core/workspace-meta'
+import type { UpdateManager } from './updater'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
@@ -93,11 +94,17 @@ export function registerIpc(
   inbox: NotificationStore,
   config: () => CvmuxConfig,
   browsers: BrowserManager,
-  meta: WorkspaceMetaStore
+  meta: WorkspaceMetaStore,
+  updater: UpdateManager
 ): ControlBridge {
   const bridge = new RendererBridge()
 
   ipcMain.handle(IPC.CONFIG, () => config())
+
+  // ── 자동 업데이트 (P26) ─────────────────────────────────────
+  ipcMain.handle(IPC.UPDATE_STATE, () => updater.current)
+  ipcMain.handle(IPC.UPDATE_CHECK, () => updater.check(true))
+  ipcMain.handle(IPC.UPDATE_INSTALL, () => updater.install())
 
   // ── 사이드바 메타데이터 (P25) ────────────────────────────────
   ipcMain.handle(IPC.WORKSPACE_META, () => meta.all())

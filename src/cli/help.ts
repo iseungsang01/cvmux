@@ -118,6 +118,11 @@ pane:
   hooks record --agent <이름>   훅이 부르는 명령. 세션 id를 stdin JSON에서 읽는다
   hooks notify --agent <이름>   훅이 부르는 명령. 알림을 cvmux로 보낸다
 
+업데이트:
+  update status          지금 상태
+  update check           새 버전 확인 (설정에서 꺼 두었어도 동작한다)
+  update install         준비된 업데이트 설치 — 앱이 종료된다
+
 기타:
   open <path>            그 디렉토리에서 새 워크스페이스
   version                버전
@@ -181,6 +186,7 @@ const USAGE: Record<string, string> = {
   'sidebar-state': 'Usage: cvmux sidebar-state',
   'right-sidebar': 'Usage: cvmux right-sidebar <toggle|show|hide|set> [--mode log|todo|sessions|find]',
   todo: 'Usage: cvmux todo <add|list|check|uncheck|start|edit|rm|clear|set> [args]',
+  update: 'Usage: cvmux update <status|check|install>',
   open: 'Usage: cvmux open <path>',
   version: 'Usage: cvmux version',
   help: 'Usage: cvmux help'

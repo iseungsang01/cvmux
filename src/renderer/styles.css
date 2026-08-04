@@ -844,6 +844,37 @@ kbd {
   margin: 0;
 }
 
+/* ── 업데이트 알림 (P26-2) ────────────────────────────────── */
+
+/*
+ * 준비됐을 때만 뜬다.
+ *
+ * 대화상자로 막아서지 않는 대신 눈에는 띄어야 한다 — 알림 종 옆에 두어
+ * "확인할 것이 있다"는 같은 자리에서 읽히게 한다.
+ */
+.titlebar-update {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-update:hover {
+  background: var(--bg-row-active);
+}
+
+/* 업데이트 버튼이 있으면 종은 그 옆에 붙는다 */
+.titlebar-update + .titlebar-bell {
+  margin-left: 6px;
+}
+
 /* ── 사이드바 메타데이터 (P25) ────────────────────────────── */
 
 .session-meta {

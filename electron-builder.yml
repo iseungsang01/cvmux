@@ -6,6 +6,15 @@ directories:
   output: release
   buildResources: build
 
+# 자동 업데이트가 볼 곳 (P26-6).
+#
+# 저장소가 공개라 별도 서버가 필요 없다. 태그를 밀면 CI가 설치 파일과
+# latest.yml을 릴리스에 올리고, 앱은 그 파일 하나만 보면 된다.
+publish:
+  provider: github
+  owner: iseungsang01
+  repo: cvmux
+
 # node-pty는 N-API(node-addon-api) 모듈이라 ABI가 고정돼 있다. npm이 설치한
 # 바이너리가 Electron에서 그대로 동작하는 것을 실측으로 확인했으므로 다시 빌드하지
 # 않는다. 켜두면 node-gyp가 Visual Studio를 찾다 실패하고, 빌드하려면 2GB짜리

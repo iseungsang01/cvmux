@@ -19,6 +19,7 @@ import { NotificationStore } from '../src/core/notifications'
 import { WorkspaceMetaStore } from '../src/core/workspace-meta'
 import { DEFAULT_CONFIG } from '../src/shared/config'
 import type { BrowserManager } from '../src/main/browser'
+import type { UpdateManager } from '../src/main/updater'
 import type { PtyManager } from '../src/core/pty-manager'
 import type { SessionMeta, Workspace } from '../src/shared/types'
 import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
@@ -196,6 +197,12 @@ async function main(): Promise<void> {
       browsers: { list: () => [] } as unknown as BrowserManager,
       meta: metaStore,
       layout: () => layout,
+      // 업데이트는 이 테스트의 대상이 아니다 — 상태를 묻는 길만 있으면 된다
+      updater: {
+        current: { status: 'current', version: null, notes: null, error: null, percent: 0 },
+        check: () => Promise.resolve({ status: 'current', version: null, notes: null, error: null, percent: 0 }),
+        install: () => false
+      } as unknown as UpdateManager,
       showWindow: () => {
         focused++
       },

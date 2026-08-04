@@ -13,6 +13,7 @@ import { POLICY } from '@shared/policy'
 import { IPC, type Workspace } from '@shared/types'
 import { BrowserManager } from './browser'
 import { ControlSocketServer, pipePathFor } from './control-socket'
+import { UpdateManager } from './updater'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { createTray, type TrayController } from './tray'
@@ -89,6 +90,20 @@ const agentSessions = new AgentSessionStore()
  */
 const workspaceMeta = new WorkspaceMetaStore(() => {
   broadcast(IPC.EVT_WORKSPACE_META, workspaceMeta.all())
+})
+
+/**
+ * 자동 업데이트 (P26).
+ *
+ * 내려받기는 조용히, 설치는 다음에 끝낼 때. 터미널 워크스페이스에는 몇 시간짜리
+ * 세션이 떠 있으므로 알아서 다시 켜는 앱은 그것을 전부 죽인다.
+ */
+const updater = new UpdateManager({
+  onChange: (state) => {
+    broadcast(IPC.EVT_UPDATE, state)
+    tray?.refresh()
+  },
+  enabled: () => configStore.current.config.update.enabled
 })
 
 /**
@@ -219,6 +234,36 @@ function requestQuit(): void {
     quitting = true
     app.quit()
   })
+}
+
+/**
+ * 업데이트를 지금 설치할지 묻는다 (P26-3).
+ *
+ * 설치는 앱을 끄고 설치 프로그램을 띄운다 — 실행 중인 세션이 전부 끝난다.
+ * 종료와 같은 무게의 일이므로 종료와 같은 방식으로 묻는다(P10-1).
+ */
+async function confirmInstall(): Promise<void> {
+  const state = updater.current
+  if (state.status !== 'ready') return
+
+  showWindow()
+  const busy = manager.busyCount()
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['지금 설치', '나중에'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'cvmux',
+    message: `${state.version} 버전이 준비됐습니다.`,
+    detail:
+      busy > 0
+        ? `설치하면 앱이 종료되고 실행 중인 세션 ${busy}개가 함께 끝납니다.`
+        : '설치하면 앱이 종료되었다가 새 버전으로 다시 시작합니다.'
+  })
+  if (response !== 0) return
+
+  quitting = true
+  updater.install()
 }
 
 function createWindow(): void {
@@ -370,7 +415,8 @@ if (!app.requestSingleInstanceLock()) {
       inbox,
       () => configStore.current.config,
       browsers,
-      workspaceMeta
+      workspaceMeta,
+      updater
     )
 
     /*
@@ -388,6 +434,7 @@ if (!app.requestSingleInstanceLock()) {
         browsers,
         meta: workspaceMeta,
         layout: () => currentLayout,
+        updater,
         showWindow,
         reloadConfig: (): ConfigSnapshot => {
           const snapshot = configStore.reload()
@@ -400,6 +447,7 @@ if (!app.requestSingleInstanceLock()) {
       join(userData, 'control.json')
     )
     control.start()
+    updater.start()
 
     /*
      * 세션 안에서 `cvmux`가 보이게 한다 (P20-1).
@@ -435,7 +483,10 @@ if (!app.requestSingleInstanceLock()) {
     tray = createTray({
       show: showWindow,
       quit: requestQuit,
-      sessionCount: () => manager.list().length
+      sessionCount: () => manager.list().length,
+      // 트레이는 창을 닫아 둔 사람에게 갱신을 알리는 유일한 자리다. P26-2
+      updateState: () => updater.current,
+      installUpdate: () => void confirmInstall()
     })
     if (!tray) {
       console.warn('[cvmux] 트레이를 만들지 못했습니다. 창을 닫으면 앱이 종료됩니다. P18-6')
@@ -480,6 +531,7 @@ app.on('before-quit', (event) => {
 
   // 네이티브 뷰는 창보다 오래 살 수 있다. 앱이 끝나기 전에 거둔다. P23-2
   browsers.closeAll()
+  updater.dispose()
 
   if (persistTimer !== null) {
     clearInterval(persistTimer)

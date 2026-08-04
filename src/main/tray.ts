@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Menu, Tray, app, nativeImage, type NativeImage } from 'electron'
 
+import type { UpdateState } from '@shared/types'
+
 /**
  * 트레이 상주 (P18).
  *
@@ -21,6 +23,10 @@ export interface TrayHandlers {
   quit(): void
   /** 메뉴와 툴팁에 표시할 현재 세션 수 */
   sessionCount(): number
+  /** 지금 업데이트 상태. P26-2 */
+  updateState(): UpdateState
+  /** 준비된 업데이트를 설치한다. 확인은 호출자가 받는다 */
+  installUpdate(): void
 }
 
 export interface TrayController {
@@ -67,13 +73,31 @@ export function createTray(handlers: TrayHandlers): TrayController | null {
     const count = handlers.sessionCount()
     const label = count === 0 ? '열려 있는 세션 없음' : `세션 ${count}개`
 
-    tray.setToolTip(`cvmux — ${label}`)
+    /*
+     * 업데이트 알림 (P26-2).
+     *
+     * 창을 닫아 두고 트레이로만 쓰는 사람에게는 여기가 유일한 통로다.
+     * 준비됐을 때만 줄을 더한다 — 늘 있는 메뉴 항목은 알림이 되지 못한다.
+     */
+    const update = handlers.updateState()
+    const ready = update.status === 'ready'
+
+    tray.setToolTip(ready ? `cvmux — ${label} · 업데이트 준비됨` : `cvmux — ${label}`)
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: 'cvmux 열기', click: () => handlers.show() },
         { type: 'separator' },
         // 상태를 알리는 줄이지 누를 것이 아니다
         { label, enabled: false },
+        ...(ready
+          ? [
+              { type: 'separator' as const },
+              {
+                label: `업데이트 설치 (${update.version ?? '새 버전'})`,
+                click: () => handlers.installUpdate()
+              }
+            ]
+          : []),
         { type: 'separator' },
         { label: 'cvmux 종료', click: () => handlers.quit() }
       ])

@@ -665,6 +665,20 @@ async function run(
       }
     }
 
+    /*
+     * ── 자동 업데이트 (P26) ───────────────────────────────────
+     *
+     * 확인은 설정에서 꺼 두었어도 동작한다 — 끈 것은 자동 확인이지
+     * 기능이 아니다.
+     */
+    case 'update': {
+      const sub = args[0] ?? 'status'
+      if (sub === 'status') return client.call(M.UPDATE_STATE)
+      if (sub === 'check') return client.call(M.UPDATE_CHECK)
+      if (sub === 'install') return client.call(M.UPDATE_INSTALL)
+      throw new CliError(`모르는 하위 명령: update ${sub}`)
+    }
+
     // ── 기타 ────────────────────────────────────────────────────
     case 'open': {
       const path = args[0]

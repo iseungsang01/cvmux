@@ -53,8 +53,15 @@ export interface ThemeConfig {
 /** 동작 이름 → 키 조합. 빈 문자열이면 그 동작의 단축키를 없앤다. P22-5 */
 export type KeybindingConfig = Record<string, string>
 
+/** 자동 업데이트. P26-5 */
+export interface UpdateConfig {
+  /** 자동으로 확인하고 내려받을 것인가. 꺼도 `cvmux update check`는 동작한다 */
+  enabled: boolean
+}
+
 export interface CvmuxConfig {
   terminal: TerminalConfig
+  update: UpdateConfig
   sidebar: SidebarConfig
   theme: ThemeConfig
   keybindings: KeybindingConfig
@@ -134,6 +141,7 @@ export const DEFAULT_CONFIG: CvmuxConfig = {
     autoResumeAgentSessions: true
   },
   sidebar: { width: 264, fontSize: 13 },
+  update: { enabled: true },
   theme: DEFAULT_THEME,
   keybindings: DEFAULT_KEYBINDINGS
 }
@@ -160,6 +168,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
   const config: CvmuxConfig = {
     terminal: { ...DEFAULT_CONFIG.terminal },
     sidebar: { ...DEFAULT_CONFIG.sidebar },
+    update: { ...DEFAULT_CONFIG.update },
     theme: { ...DEFAULT_THEME },
     keybindings: { ...DEFAULT_KEYBINDINGS }
   }
@@ -173,7 +182,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
   const root = raw as Record<string, unknown>
 
   for (const key of Object.keys(root)) {
-    if (!['terminal', 'sidebar', 'theme', 'keybindings'].includes(key)) {
+    if (!['terminal', 'sidebar', 'theme', 'keybindings', 'update'].includes(key)) {
       problems.push({ path: key, message: '모르는 항목입니다' })
     }
   }
@@ -228,6 +237,14 @@ export function parseConfig(raw: unknown): ParsedConfig {
     })
     num(sidebar, 'fontSize', 'sidebar.fontSize', 8, 32, problems, (v) => {
       config.sidebar.fontSize = Math.floor(v)
+    })
+  }
+
+  // ── update
+  const update = section(root.update, 'update', problems, Object.keys(DEFAULT_CONFIG.update))
+  if (update) {
+    bool(update, 'enabled', 'update.enabled', problems, (v) => {
+      config.update.enabled = v
     })
   }
 

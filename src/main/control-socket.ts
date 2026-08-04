@@ -4,6 +4,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 
 import type { BrowserManager } from './browser'
+import type { UpdateManager } from './updater'
 import {
   clickScript,
   fillScript,
@@ -74,6 +75,8 @@ export interface ControlHost {
   showWindow(): void
   /** 설정 파일을 다시 읽는다. P22-6 */
   reloadConfig(): ConfigSnapshot
+  /** 자동 업데이트. P26 */
+  updater: UpdateManager
   version: string
 }
 
@@ -632,6 +635,31 @@ export class ControlSocketServer {
         } catch (error) {
           throw new ControlError('invalid_params', error instanceof Error ? error.message : String(error))
         }
+      }
+
+      // ── 자동 업데이트 (P26) ──────────────────────────────────
+      case M.UPDATE_STATE:
+        return this.host.updater.current
+
+      case M.UPDATE_CHECK:
+        // 사용자가 직접 부른 것이므로 설정에서 꺼 두었어도 본다. P26-5
+        return this.host.updater.check(true)
+
+      case M.UPDATE_INSTALL: {
+        const state = this.host.updater.current
+        if (state.status !== 'ready') {
+          throw new ControlError(
+            'invalid_state',
+            `설치할 것이 없습니다 (지금 상태: ${state.status})`
+          )
+        }
+        /*
+         * 스크립트가 부르면 묻지 않는다 (P26-3).
+         *
+         * 화면에서 누를 때는 확인을 받지만, 소켓으로 부르는 쪽은 이미 결정을
+         * 내린 것이다 — 대화상자를 띄우면 자동화가 거기서 멈춘다.
+         */
+        return { installing: this.host.updater.install(), version: state.version }
       }
 
       case M.APP_FOCUS:
