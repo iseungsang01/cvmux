@@ -27,42 +27,160 @@ interface PaneTreeProps {
   visible: boolean
   onFocusPane(paneId: string): void
   onResize(splitId: string, dividerIndex: number, ratioDelta: number, minRatio: number): void
+  /** 가로 탭 (P24) */
+  onSelectSurface(paneId: string, index: number): void
+  onCloseSurface(surfaceId: string): void
+}
+
+/**
+ * pane 안의 가로 탭 (P24-1).
+ *
+ * cmux는 이 자리를 surface라 부른다. 사이드바 한 줄이 워크스페이스, 그 안의
+ * 칸이 pane, pane 안의 탭이 surface다.
+ */
+interface SurfaceTabsProps {
+  paneId: string
+  surfaces: string[]
+  active: number
+  sessions: Map<string, SessionMeta>
+  browsers: Map<string, BrowserMeta>
+  onSelect(paneId: string, index: number): void
+  onClose(surfaceId: string): void
+  onFocusPane(paneId: string): void
+}
+
+function SurfaceTabs({
+  paneId,
+  surfaces,
+  active,
+  sessions,
+  browsers,
+  onSelect,
+  onClose,
+  onFocusPane
+}: SurfaceTabsProps): JSX.Element {
+  return (
+    <div className="surface-tabs" role="tablist">
+      {surfaces.map((id, index) => {
+        const browser = browsers.get(id)
+        const session = sessions.get(id)
+        const label = browser ? (browser.title || browser.url || '브라우저') : (session?.title ?? '세션')
+        // 탭이 좁아도 상태는 보여야 한다 — 색 점 하나로 줄인다. P4
+        const status = session?.status ?? null
+        const unread = session?.unread === true
+
+        return (
+          <div
+            key={id}
+            className={`surface-tab${index === active ? ' is-active' : ''}${unread ? ' is-unread' : ''}`}
+            role="tab"
+            aria-selected={index === active}
+            title={label}
+            onPointerDown={(event) => {
+              // 가운데 버튼으로 닫기 — 브라우저 탭의 관례다
+              if (event.button === 1) {
+                event.preventDefault()
+                onClose(id)
+                return
+              }
+              onFocusPane(paneId)
+              onSelect(paneId, index)
+            }}
+          >
+            {browser ? (
+              <span className="surface-tab-icon">◱</span>
+            ) : (
+              <span className={`surface-tab-dot${status ? ` is-${status}` : ''}`} />
+            )}
+            <span className="surface-tab-label">{label}</span>
+            <button
+              type="button"
+              className="surface-tab-close"
+              onPointerDown={(event) => {
+                event.stopPropagation()
+                event.preventDefault()
+                onClose(id)
+              }}
+              title="탭 닫기"
+              aria-label="탭 닫기"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function PaneTree(props: PaneTreeProps): JSX.Element | null {
-  const { node, sessions, browsers, host, focusedPaneId, visible, onFocusPane, onResize } = props
+  const {
+    node,
+    sessions,
+    browsers,
+    host,
+    focusedPaneId,
+    visible,
+    onFocusPane,
+    onResize,
+    onSelectSurface,
+    onCloseSurface
+  } = props
 
   if (node.kind === 'leaf') {
+    const active = node.surfaces[Math.min(node.active, node.surfaces.length - 1)]
+    const focused = node.id === focusedPaneId
+
     /*
      * 잎 하나는 터미널이거나 브라우저다 (P23-2).
      *
      * 트리에 종류를 따로 적지 않고 id가 어느 목록에 있는지로 가른다 — 배치를
      * 다루는 코드(분할·닫기·복원)가 둘을 구분할 이유가 없기 때문이다.
      */
-    const browser = browsers.get(node.sessionId)
-    if (browser) {
-      return (
-        <BrowserPane
-          paneId={node.id}
-          meta={browser}
-          focused={node.id === focusedPaneId}
-          visible={visible}
-          onFocus={onFocusPane}
-        />
-      )
-    }
+    const browser = browsers.get(active)
+    const session = browser ? undefined : sessions.get(active)
+    if (!browser && !session) return null
 
-    const session = sessions.get(node.sessionId)
-    if (!session) return null
     return (
-      <TerminalPane
-        paneId={node.id}
-        session={session}
-        host={host}
-        focused={node.id === focusedPaneId}
-        visible={visible}
-        onFocus={onFocusPane}
-      />
+      <div className="pane-stack">
+        {/*
+          탭 바는 탭이 둘 이상일 때만 그린다 (P24-1).
+
+          하나뿐인데 탭 바가 있으면 화면만 잡아먹고 아무것도 알려주지 않는다.
+          나누어 쓰지 않는 사용자에게는 이 구조가 아예 보이지 않아야 한다.
+        */}
+        {node.surfaces.length > 1 && (
+          <SurfaceTabs
+            paneId={node.id}
+            surfaces={node.surfaces}
+            active={node.active}
+            sessions={sessions}
+            browsers={browsers}
+            onSelect={onSelectSurface}
+            onClose={onCloseSurface}
+            onFocusPane={onFocusPane}
+          />
+        )}
+
+        {browser ? (
+          <BrowserPane
+            paneId={node.id}
+            meta={browser}
+            focused={focused}
+            visible={visible}
+            onFocus={onFocusPane}
+          />
+        ) : (
+          <TerminalPane
+            paneId={node.id}
+            session={session!}
+            host={host}
+            focused={focused}
+            visible={visible}
+            onFocus={onFocusPane}
+          />
+        )}
+      </div>
     )
   }
 

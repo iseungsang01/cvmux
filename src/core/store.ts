@@ -35,7 +35,13 @@ export interface PersistedSession {
  * 저장된 id는 아무 의미가 없다. 순번은 sessions 배열의 위치를 뜻한다.
  */
 export type PersistedPane =
-  | { kind: 'leaf'; sessionIndex: number }
+  /**
+   * 잎 하나에 가로 탭이 여럿 들어간다 (P24-5).
+   *
+   * 브라우저 화면은 세션이 아니라 순번이 없으므로 저장되지 않는다 — 복원하면
+   * 터미널 탭만 돌아온다. 페이지를 되살리는 것은 다음 일이다.
+   */
+  | { kind: 'leaf'; sessionIndexes: number[]; active: number }
   | {
       kind: 'split'
       direction: 'row' | 'column'
@@ -225,11 +231,31 @@ function parsePane(value: unknown, count: number, dropped: number): PersistedPan
   const node = value as Partial<PersistedPane> & { kind?: string }
 
   if (node.kind === 'leaf') {
-    const raw = (node as { sessionIndex?: unknown }).sessionIndex
-    if (typeof raw !== 'number') return null
-    const index = raw - dropped
-    if (index < 0 || index >= count) return null
-    return { kind: 'leaf', sessionIndex: index }
+    /*
+     * 옛 파일에는 탭이 없었다 (P24-5).
+     *
+     * `sessionIndex` 하나짜리 잎도 읽는다 — 앱을 갱신했다고 열어 둔 배치가
+     * 사라지면 그건 복원이 아니다(P16).
+     */
+    const raw = node as { sessionIndex?: unknown; sessionIndexes?: unknown; active?: unknown }
+    const list = Array.isArray(raw.sessionIndexes)
+      ? raw.sessionIndexes
+      : typeof raw.sessionIndex === 'number'
+        ? [raw.sessionIndex]
+        : []
+
+    const kept: number[] = []
+    for (const value of list) {
+      if (typeof value !== 'number') continue
+      const index = value - dropped
+      // 상한에 걸려 잘려나간 세션을 가리키는 탭은 버린다
+      if (index < 0 || index >= count) continue
+      kept.push(index)
+    }
+    if (kept.length === 0) return null
+
+    const active = typeof raw.active === 'number' ? raw.active : 0
+    return { kind: 'leaf', sessionIndexes: kept, active: Math.min(Math.max(0, active), kept.length - 1) }
   }
 
   if (node.kind === 'split') {
@@ -268,10 +294,17 @@ export function workspacesFromPersisted(
 
     const build = (node: PersistedPane): PaneNode | null => {
       if (node.kind === 'leaf') {
-        const sessionId = sessionIds[node.sessionIndex]
-        if (!sessionId) return null
-        const leaf: PaneNode = { kind: 'leaf', id: randomUUID(), sessionId }
-        if (sessionId === focusedSession && focusedPaneId === null) focusedPaneId = leaf.id
+        // 되살아나지 못한 세션의 탭은 조용히 빠진다. 전부 빠지면 잎도 사라진다
+        const surfaces = node.sessionIndexes
+          .map((index) => sessionIds[index])
+          .filter((id): id is string => typeof id === 'string' && id !== '')
+        if (surfaces.length === 0) return null
+
+        const active = Math.min(Math.max(0, node.active), surfaces.length - 1)
+        const leaf: PaneNode = { kind: 'leaf', id: randomUUID(), surfaces, active }
+        if (surfaces.includes(focusedSession ?? '') && focusedPaneId === null) {
+          focusedPaneId = leaf.id
+        }
         return leaf
       }
 
@@ -321,10 +354,24 @@ export function workspacesToPersisted(
 
     const convert = (node: PaneNode): PersistedPane | null => {
       if (node.kind === 'leaf') {
-        const index = indexOf.get(node.sessionId)
-        if (index === undefined) return null
-        if (node.id === workspace.focusedPaneId) focusedIndex = index
-        return { kind: 'leaf', sessionIndex: index }
+        /*
+         * 순번을 아는 것만 남긴다 (P24-5).
+         *
+         * 브라우저 화면은 세션이 아니라 순번이 없다. 그래서 탭 목록에서 빠지고,
+         * 활성 자리는 남은 것 기준으로 다시 센다 — 그러지 않으면 복원했을 때
+         * 엉뚱한 탭이 열려 있다.
+         */
+        const kept: number[] = []
+        let active = 0
+        node.surfaces.forEach((surfaceId, i) => {
+          const index = indexOf.get(surfaceId)
+          if (index === undefined) return
+          if (i <= node.active) active = kept.length
+          kept.push(index)
+        })
+        if (kept.length === 0) return null
+        if (node.id === workspace.focusedPaneId) focusedIndex = kept[active]
+        return { kind: 'leaf', sessionIndexes: kept, active }
       }
       const children: PersistedPane[] = []
       const sizes: number[] = []

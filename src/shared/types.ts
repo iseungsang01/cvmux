@@ -110,7 +110,20 @@ export interface BrowserRect {
  * 잎 하나이므로, 분할을 쓰지 않는 사용자에게는 이 구조가 보이지 않는다.
  */
 export type PaneNode =
-  | { kind: 'leaf'; id: string; sessionId: string }
+  | {
+      kind: 'leaf'
+      id: string
+      /**
+       * 이 pane 안의 가로 탭 (P24).
+       *
+       * 각 항목은 터미널 세션 id이거나 브라우저 화면 id다 — 배치를 다루는 코드가
+       * 둘을 구분할 이유가 없어서 한 목록에 담는다(P23-2와 같은 이유).
+       * cmux는 이것을 surface라 부르고, 여기서도 같은 말을 쓴다.
+       */
+      surfaces: string[]
+      /** 지금 보이는 탭의 자리. 항상 surfaces 범위 안이다 */
+      active: number
+    }
   | {
       kind: 'split'
       id: string

@@ -171,15 +171,33 @@ function main(): void {
   /*
    * 기본 단축키는 셸이 쓰는 키를 건드리지 않는다 (P6-1).
    *
-   * Ctrl 단독 조합은 거의 다 PSReadLine의 것이다. 기본값이 그것을 가로채면
-   * 설정을 열어 보기도 전에 셸이 망가진다.
+   * 문제가 되는 것은 **`Ctrl` + 글자**다 — PSReadLine과 readline이 거의 전부를
+   * 쓴다(Ctrl+A 줄 처음, Ctrl+C 인터럽트, Ctrl+R 기록 검색 …). 기본값이 그것을
+   * 가로채면 설정을 열어 보기도 전에 셸이 망가진다.
+   *
+   * `Ctrl+Tab`은 여기 걸리지 않는다. 글자 키가 아니고, 터미널 호스트가 탭
+   * 전환에 쓰는 것이 관례라(Windows Terminal도 그렇다) 셸에 닿지 않는다.
    */
   {
     const offenders = Object.entries(DEFAULT_CONFIG.keybindings).filter(([, text]) => {
       const chord = parseChord(text)
-      return chord !== null && chord.ctrl && !chord.shift && !chord.alt
+      if (chord === null) return false
+      if (!chord.ctrl || chord.shift || chord.alt) return false
+      return /^Key[A-Z]$/.test(chord.code)
     })
-    check('Ctrl 단독 기본 단축키 없음', offenders.length === 0, offenders.map(([a]) => a).join(','))
+    check('Ctrl+글자 기본 단축키 없음', offenders.length === 0, offenders.map(([a]) => a).join(','))
+  }
+
+  // 그래도 Ctrl 단독은 예외적이어야 한다 — 지금 허용하는 것은 Tab뿐이다
+  {
+    const ctrlOnly = Object.entries(DEFAULT_CONFIG.keybindings)
+      .map(([action, text]) => [action, parseChord(text)] as const)
+      .filter(([, chord]) => chord !== null && chord.ctrl && !chord.shift && !chord.alt)
+    check(
+      'Ctrl 단독은 Tab뿐',
+      ctrlOnly.every(([, chord]) => chord?.code === 'Tab'),
+      ctrlOnly.map(([a]) => a).join(',')
+    )
   }
 
   console.log(results.join('\n'))

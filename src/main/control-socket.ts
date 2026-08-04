@@ -43,6 +43,21 @@ export interface ControlBridge {
   call(method: string, params: Record<string, unknown>): Promise<unknown>
 }
 
+/**
+ * 렌더러가 붙여 보낸 오류 코드를 나르는 오류 (P20-8).
+ *
+ * 다리를 놓는 쪽(ipc.ts)이 아니라 코드를 해석하는 쪽에 둔다 — 이 파일은
+ * Electron에 기대지 않으므로 테스트가 그대로 불러 쓸 수 있다.
+ */
+export class BridgeError extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message)
+  }
+}
+
 export interface ControlHost {
   manager: PtyManager
   bridge: ControlBridge
@@ -246,7 +261,13 @@ export class ControlSocketServer {
       if (result === STREAMING) return
       client.socket.write(`${JSON.stringify({ id, ok: true, result })}\n`)
     } catch (error) {
-      const code = error instanceof ControlError ? error.code : 'internal_error'
+      // 렌더러가 붙인 코드도 그대로 살린다. P20-8
+      const code =
+        error instanceof ControlError
+          ? error.code
+          : error instanceof BridgeError
+            ? (error.code as ControlErrorCode)
+            : 'internal_error'
       const message = error instanceof Error ? error.message : String(error)
       this.fail(client, id, code, message)
     }

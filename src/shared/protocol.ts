@@ -155,6 +155,11 @@ export const M = {
   WORKSPACE_TREE: 'workspace.tree',
 
   PANE_LIST: 'pane.list',
+  /** 가로 탭 (P24-6). cmux의 `new-surface`/`close-surface`에 해당 */
+  SURFACE_NEW: 'surface.new',
+  SURFACE_CLOSE: 'surface.close',
+  SURFACE_SELECT: 'surface.select',
+  SURFACE_LIST: 'surface.list',
   PANE_SPLIT: 'pane.split',
   PANE_FOCUS: 'pane.focus',
   PANE_CLOSE: 'pane.close',
@@ -210,6 +215,10 @@ export const RENDERER_METHODS: ReadonlySet<string> = new Set<string>([
   M.WORKSPACE_CURRENT,
   M.WORKSPACE_TREE,
   M.PANE_LIST,
+  M.SURFACE_NEW,
+  M.SURFACE_CLOSE,
+  M.SURFACE_SELECT,
+  M.SURFACE_LIST,
   M.PANE_SPLIT,
   M.PANE_FOCUS,
   M.PANE_CLOSE,

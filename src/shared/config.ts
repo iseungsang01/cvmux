@@ -71,6 +71,15 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   'workspace.new': 'Ctrl+Shift+N',
   'workspace.rename': 'Ctrl+Shift+E',
   'pane.close': 'Ctrl+Shift+W',
+  /*
+   * 가로 탭 (P24-3).
+   *
+   * `Ctrl+Tab`은 셸이 쓰지 않으므로 그대로 쓸 수 있다 — 브라우저와 편집기에서
+   * 이미 몸에 익은 조합이라 여기서만 다른 키를 쓸 이유가 없다.
+   */
+  'surface.new': 'Ctrl+Shift+T',
+  'surface.next': 'Ctrl+Tab',
+  'surface.previous': 'Ctrl+Shift+Tab',
   'pane.split.right': 'Alt+Shift+Equal',
   'pane.split.down': 'Alt+Shift+Minus',
   'view.sidebar': 'Ctrl+Shift+B',

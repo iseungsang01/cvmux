@@ -144,7 +144,14 @@ export function Sidebar({
       </ul>
 
       <footer className="sidebar-foot">
-        <span>{workspaces.length}개 세션</span>
+        {/*
+          세는 것과 부르는 이름을 맞춘다.
+
+          여기 있는 줄 하나는 워크스페이스이지 세션이 아니다 — 한 줄 안에
+          pane이 여럿이고 pane 안에 탭이 여럿일 수 있다(P17 / P24). "3개 세션"
+          이라 적어 놓고 실제로는 8개가 돌고 있으면 그 숫자는 거짓말이 된다.
+        */}
+        <span>{workspaces.length}개 워크스페이스</span>
         <kbd>Ctrl+Shift+B</kbd>
       </footer>
     </aside>

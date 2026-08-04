@@ -385,6 +385,21 @@ async function run(
         pane,
         direction: str(flags, 'direction') ?? args[0] ?? 'right'
       })
+    // ── 가로 탭 (P24-6) ────────────────────────────────────────
+    case 'list-surfaces':
+      return client.call(M.SURFACE_LIST, { workspace, pane })
+    case 'new-surface':
+      return client.call(M.SURFACE_NEW, {
+        workspace,
+        pane,
+        kind: str(flags, 'kind') ?? args[0],
+        url: str(flags, 'url')
+      })
+    case 'select-surface':
+      return client.call(M.SURFACE_SELECT, { workspace, pane, surface: args[0] ?? str(flags, 'surface') })
+    case 'close-surface':
+      return client.call(M.SURFACE_CLOSE, { workspace, pane, surface: args[0] ?? str(flags, 'surface') })
+
     case 'focus-pane':
       return client.call(M.PANE_FOCUS, { workspace, pane: args[0] ?? pane })
     case 'close-pane':

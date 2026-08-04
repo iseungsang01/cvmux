@@ -1,5 +1,5 @@
 import type { PaneNode, SessionMeta, SessionStatus, Workspace } from '@shared/types'
-import { collectLeaves, collectSessionIds, createLeaf, findLeaf } from './layout'
+import { activeSurface, collectLeaves, collectSessionIds, createLeaf, findLeaf } from './layout'
 
 /**
  * 워크스페이스(사이드바 한 줄)와 그 안의 pane들을 잇는 유틸 (POLICY.md P17).
@@ -31,15 +31,15 @@ export function makeWorkspace(sessionId: string, title: string | null = null): W
   return { id: nextWorkspaceId(), title, root: leaf, focusedPaneId: leaf.id }
 }
 
-/** 포커스된 pane이 붙들고 있는 세션 */
+/** 포커스된 pane이 지금 보여주고 있는 surface. P24 */
 export function focusedSessionId(workspace: Workspace): string | null {
   const leaf = findLeaf(workspace.root, workspace.focusedPaneId)
-  return leaf && leaf.kind === 'leaf' ? leaf.sessionId : null
+  return leaf && leaf.kind === 'leaf' ? activeSurface(leaf) : null
 }
 
 export function sessionIdOfPane(root: PaneNode, paneId: string): string | null {
   const leaf = findLeaf(root, paneId)
-  return leaf && leaf.kind === 'leaf' ? leaf.sessionId : null
+  return leaf && leaf.kind === 'leaf' ? activeSurface(leaf) : null
 }
 
 /** 워크스페이스를 대표하는 세션. 사이드바의 상태·미리보기가 이걸 따른다. P17-7 / P17-8 */

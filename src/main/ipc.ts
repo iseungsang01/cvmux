@@ -13,7 +13,7 @@ import {
   type Workspace
 } from '@shared/types'
 import type { BrowserManager } from './browser'
-import type { ControlBridge } from './control-socket'
+import { BridgeError, type ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
 
 /** pane 배치를 어디서 읽고 어디에 저장할지는 호출자(main/index.ts)가 결정한다. P17 */
@@ -58,8 +58,23 @@ class RendererBridge implements ControlBridge {
     if (!pending) return
     this.waiting.delete(id)
     clearTimeout(pending.timer)
-    if (ok) pending.resolve(payload)
-    else pending.reject(new Error(typeof payload === 'string' ? payload : '요청을 처리하지 못했습니다'))
+    if (ok) {
+      pending.resolve(payload)
+      return
+    }
+
+    /*
+     * 렌더러가 붙인 오류 코드를 살려 보낸다 (P20-8).
+     *
+     * 전부 `internal_error`로 뭉개지면 스크립트는 "내가 잘못 불렀는가"와
+     * "앱이 고장났는가"를 구분하지 못한다.
+     */
+    const fault = payload as { code?: unknown; message?: unknown } | string | null
+    if (typeof fault === 'object' && fault !== null && typeof fault.message === 'string') {
+      pending.reject(new BridgeError(String(fault.code ?? 'internal_error'), fault.message))
+      return
+    }
+    pending.reject(new Error(typeof fault === 'string' ? fault : '요청을 처리하지 못했습니다'))
   }
 }
 

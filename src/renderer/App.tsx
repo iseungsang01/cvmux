@@ -9,15 +9,18 @@ import { NotificationPanel } from './components/NotificationPanel'
 import { PaneTree } from './components/PaneTree'
 import { Sidebar } from './components/Sidebar'
 import {
-  closePane,
-  collectLeaves,
+  addSurface,
+  closeSurface as closeSurfaceInTree,
+  collectAllSurfaces,
+  cycleSurface,
+  findLeaf,
   findLeafBySession,
   firstLeafId,
-  findLeaf,
   resizeSplit,
+  selectSurface,
   splitPane
 } from './lib/layout'
-import { handleControl, type ControlContext } from './lib/control'
+import { ControlRequestError, handleControl, type ControlContext } from './lib/control'
 import type { Command } from './lib/palette'
 import { focusedSessionId, makeWorkspace, reorder, sessionIdOfPane } from './lib/workspace'
 import { TerminalHost } from './terminal-host'
@@ -196,9 +199,16 @@ export function App(): JSX.Element {
   const dropSurface = useCallback((surfaceId: string): void => {
     setWorkspaces((prev) =>
       prev.flatMap((workspace) => {
-        const leaf = findLeafBySession(workspace.root, surfaceId)
-        if (!leaf) return [workspace]
-        const next = closePane(workspace.root, leaf.id)
+        if (findLeafBySession(workspace.root, surfaceId) === null) return [workspace]
+
+        /*
+         * 탭 하나만 걷어낸다 (P24-2).
+         *
+         * 세션이 죽었다고 pane을 통째로 없애면 같은 pane의 다른 탭들이 함께
+         * 사라진다. 마지막 탭이었을 때만 pane이 사라지고, 그것이 워크스페이스의
+         * 마지막이었으면 워크스페이스가 사라진다.
+         */
+        const next = closeSurfaceInTree(workspace.root, surfaceId)
         if (next === null) return []
         const stillThere = findLeaf(next, workspace.focusedPaneId) !== null
         return [
@@ -209,6 +219,79 @@ export function App(): JSX.Element {
           }
         ]
       })
+    )
+  }, [])
+
+  // ── 가로 탭 (P24) ────────────────────────────────────────────
+
+  const handleSelectSurface = useCallback((paneId: string, index: number): void => {
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeIdRef.current ? { ...w, root: selectSurface(w.root, paneId, index) } : w
+      )
+    )
+  }, [])
+
+  /**
+   * 지금 pane에 탭을 하나 더 연다 (P24-1).
+   *
+   * 분할과 다르다 — 분할은 화면을 나누고, 탭은 같은 자리를 겹쳐 쓴다. 화면이
+   * 좁은데 세션은 더 필요할 때 이쪽이 맞다.
+   */
+  const openSurfaceIn = useCallback(
+    async (
+      workspaceId: string,
+      paneId: string,
+      kind: 'terminal' | 'browser',
+      url = 'about:blank'
+    ): Promise<string> => {
+      let surfaceId: string
+      if (kind === 'browser') {
+        const meta = await window.cvmux.browserCreate(url)
+        setBrowsers((prev) => new Map(prev).set(meta.id, meta))
+        surfaceId = meta.id
+      } else {
+        // 새 탭은 같은 pane이 보고 있던 작업 디렉토리에서 시작한다. P17-2와 같은 이유
+        const source = workspacesRef.current.find((w) => w.id === workspaceId)
+        const from = source ? sessionIdOfPane(source.root, paneId) : null
+        const cwd = from !== null ? sessionsRef.current.find((s) => s.id === from)?.cwd : undefined
+        const result = await window.cvmux.create({ cwd })
+        if (!result.ok || !result.session) {
+          const message = result.error ?? '세션을 만들지 못했습니다.'
+          setError(message)
+          throw new Error(message)
+        }
+        setError(null)
+        surfaceId = result.session.id
+      }
+
+      setWorkspaces((prev) =>
+        prev.map((w) => {
+          if (w.id !== workspaceId) return w
+          const next = addSurface(w.root, paneId, surfaceId)
+          return next ? { ...w, root: next } : w
+        })
+      )
+      return surfaceId
+    },
+    []
+  )
+
+  /** 단축키·팔레트에서 쓰는 짧은 길 — 지금 보고 있는 pane에 연다 */
+  const openSurface = useCallback(
+    async (kind: 'terminal' | 'browser' = 'terminal', url = 'about:blank'): Promise<void> => {
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) return
+      await openSurfaceIn(workspace.id, workspace.focusedPaneId, kind, url).catch(() => undefined)
+    },
+    [openSurfaceIn]
+  )
+
+  const cycleFocusedSurface = useCallback((delta: number): void => {
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeIdRef.current ? { ...w, root: cycleSurface(w.root, w.focusedPaneId, delta) } : w
+      )
     )
   }, [])
 
@@ -531,15 +614,16 @@ export function App(): JSX.Element {
     const needle = find.query.toLowerCase()
     const hits: FindHit[] = []
     for (const workspace of workspaces) {
-      for (const leaf of collectLeaves(workspace.root)) {
-        const meta = sessionMap.get(leaf.sessionId)
+      // 숨은 탭의 화면에서도 찾는다 — "어느 세션에서 봤더라"가 질문이므로. P24-4
+      for (const surfaceId of collectAllSurfaces(workspace.root)) {
+        const meta = sessionMap.get(surfaceId)
         if (!meta) continue
-        const lines = host.bufferText(leaf.sessionId)
+        const lines = host.bufferText(surfaceId)
         lines.forEach((text, line) => {
           if (hits.length >= 200) return
           if (!text.toLowerCase().includes(needle)) return
           hits.push({
-            sessionId: leaf.sessionId,
+            sessionId: surfaceId,
             sessionTitle: meta.title,
             workspaceId: workspace.id,
             line,
@@ -751,6 +835,30 @@ export function App(): JSX.Element {
         run: () => void window.cvmux.notificationsClear('read')
       },
       {
+        id: 'surface.new',
+        title: '새 탭 (이 pane 안에)',
+        keywords: 'new surface tab pane',
+        hint: hint('surface.new'),
+        section: 'pane',
+        run: () => void openSurface('terminal').catch(() => undefined)
+      },
+      {
+        id: 'surface.next',
+        title: '다음 탭',
+        keywords: 'next surface tab',
+        hint: hint('surface.next'),
+        section: 'pane',
+        run: () => cycleFocusedSurface(1)
+      },
+      {
+        id: 'surface.previous',
+        title: '이전 탭',
+        keywords: 'previous surface tab',
+        hint: hint('surface.previous'),
+        section: 'pane',
+        run: () => cycleFocusedSurface(-1)
+      },
+      {
         id: 'browser.open',
         title: '브라우저 열기',
         keywords: 'browser open web preview page',
@@ -791,9 +899,11 @@ export function App(): JSX.Element {
     focusedId,
     hint,
     jumpToUnread,
+    cycleFocusedSurface,
     notifications,
     openBrowser,
     openFind,
+    openSurface,
     sessionMap,
     sidebarCollapsed,
     splitFocused,
@@ -841,6 +951,7 @@ export function App(): JSX.Element {
     const ctx: ControlContext = {
       workspaces: () => workspacesRef.current,
       sessions: () => new Map(sessionsRef.current.map((s) => [s.id, s])),
+      browsers: () => browsersRef.current,
       activeId: () => activeIdRef.current,
       select: setActiveId,
       create: (options) => createWorkspace(options),
@@ -850,6 +961,13 @@ export function App(): JSX.Element {
       focusPane: focusPaneIn,
       closeSession: closeSurface,
       openBrowser: (url, direction) => openBrowser(url, direction),
+      openSurface: (workspaceId, paneId, kind, url) =>
+        openSurfaceIn(workspaceId, paneId, kind, url ?? 'about:blank'),
+      selectSurface: (workspaceId, paneId, index) => {
+        setWorkspaces((prev) =>
+          prev.map((w) => (w.id === workspaceId ? { ...w, root: selectSurface(w.root, paneId, index) } : w))
+        )
+      },
       dropSurface,
       markRead: (id) => {
         void window.cvmux.markRead(id)
@@ -872,7 +990,9 @@ export function App(): JSX.Element {
           window.cvmux.controlReply(
             ask.id,
             false,
-            error instanceof Error ? error.message : String(error)
+            error instanceof ControlRequestError
+              ? { code: error.code, message: error.message }
+              : { code: 'internal_error', message: error instanceof Error ? error.message : String(error) }
           )
       )
     })
@@ -884,6 +1004,7 @@ export function App(): JSX.Element {
     dropSurface,
     focusPaneIn,
     openBrowser,
+    openSurfaceIn,
     openFind,
     renameWorkspace,
     splitPaneIn
@@ -1005,6 +1126,8 @@ export function App(): JSX.Element {
                     visible={workspace.id === activeId}
                     onFocusPane={handleFocusPane}
                     onResize={handleResize}
+                    onSelectSurface={handleSelectSurface}
+                    onCloseSurface={closeSurface}
                   />
                 </div>
               ))}
@@ -1022,15 +1145,11 @@ export function App(): JSX.Element {
   )
 }
 
+/**
+ * 워크스페이스가 붙들고 있는 모든 surface (P24-4).
+ *
+ * 보이는 것만 세면 탭 뒤의 세션이 조용히 남아 프로세스만 살아 있게 된다.
+ */
 function paneSessionIds(workspace: Workspace): string[] {
-  const out: string[] = []
-  const walk = (node: Workspace['root']): void => {
-    if (node.kind === 'leaf') {
-      out.push(node.sessionId)
-      return
-    }
-    node.children.forEach(walk)
-  }
-  walk(workspace.root)
-  return out
+  return collectAllSurfaces(workspace.root)
 }

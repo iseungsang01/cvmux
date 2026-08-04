@@ -44,6 +44,12 @@ pane:
   focus-pane <h>         포커스 이동
   close-pane [h]         닫기
 
+가로 탭 (pane 안):
+  list-surfaces          탭 목록
+  new-surface [kind]     새 탭 (terminal|browser, 기본 terminal)
+  select-surface <h>     탭 고르기 (surface:2 또는 순번)
+  close-surface [h]      탭 닫기 (생략하면 지금 보는 탭)
+
 세션:
   list-sessions          세션 목록
   read-screen            화면을 텍스트로 (--lines N)
@@ -121,6 +127,10 @@ const USAGE: Record<string, string> = {
   'new-split': 'Usage: cvmux new-split [right|left|down|up] [--pane <handle>]',
   'focus-pane': 'Usage: cvmux focus-pane <id|ref|index>',
   'close-pane': 'Usage: cvmux close-pane [id|ref|index]',
+  'list-surfaces': 'Usage: cvmux list-surfaces [--workspace <handle>] [--pane <handle>]',
+  'new-surface': 'Usage: cvmux new-surface [terminal|browser] [--url <url>] [--pane <handle>]',
+  'select-surface': 'Usage: cvmux select-surface <surface:N|index|id>',
+  'close-surface': 'Usage: cvmux close-surface [surface:N|index|id]',
   'list-sessions': 'Usage: cvmux list-sessions',
   'read-screen': 'Usage: cvmux read-screen [--session <handle>] [--lines <n>]',
   send: 'Usage: cvmux send <text> [--enter] [--session <handle>]',

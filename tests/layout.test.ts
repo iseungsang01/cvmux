@@ -8,12 +8,19 @@
  */
 import type { PaneNode } from '../src/shared/types'
 import {
+  addSurface,
   closePane,
+  closeSurface,
+  collectAllSurfaces,
   collectSessionIds,
   createLeaf,
+  cycleSurface,
+  findLeafBySession,
   firstLeafId,
+  moveSurface,
   paneCount,
   resizeSplit,
+  selectSurface,
   splitPane
 } from '../src/renderer/lib/layout'
 import { reorder } from '../src/renderer/lib/workspace'
@@ -26,9 +33,16 @@ function check(name: string, ok: boolean, detail = ''): void {
   results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? `  ← ${detail}` : ''}`)
 }
 
-/** 트리 모양을 문자열로 — 비교하기 쉽게 */
+/**
+ * 트리 모양을 문자열로 — 비교하기 쉽게.
+ *
+ * 잎에 탭이 여럿이면 `[a|b]`로 적고, 활성 탭에 `*`를 붙인다.
+ */
 function shape(node: PaneNode): string {
-  if (node.kind === 'leaf') return node.sessionId
+  if (node.kind === 'leaf') {
+    if (node.surfaces.length === 1) return node.surfaces[0]
+    return `[${node.surfaces.map((s, i) => (i === node.active ? `*${s}` : s)).join('|')}]`
+  }
   return `${node.direction === 'row' ? 'H' : 'V'}(${node.children.map(shape).join(' ')})`
 }
 
@@ -203,6 +217,131 @@ function main(): void {
     check('P19-8 범위 밖 출발', reorder(list, -1, 2) === list)
     check('P19-8 범위 밖 도착', reorder(list, 0, 9) === list)
     check('P19-8 빈 목록', reorder([], 0, 1).length === 0)
+  }
+
+  // ── P24-1: pane 안의 가로 탭
+  {
+    const root = createLeaf('s1')
+    const one = addSurface(root, root.id, 's2')
+    check('P24-1 탭 추가', one !== null && shape(one) === '[s1|*s2]', one ? shape(one) : 'null')
+
+    /*
+     * 새 탭은 지금 탭의 바로 오른쪽에 들어간다.
+     *
+     * 맨 끝에 붙이면 탭이 많을 때 방금 연 것이 화면 밖에 생긴다.
+     */
+    const two = one ? addSurface(one, root.id, 's3') : null
+    check('P24-1 현재 탭 오른쪽에 낀다', two !== null && shape(two) === '[s1|s2|*s3]', two ? shape(two) : 'null')
+
+    const back = two ? selectSurface(two, root.id, 0) : null
+    const middle = back ? addSurface(back, root.id, 's4') : null
+    check(
+      'P24-1 앞으로 돌아가 열면 그 옆',
+      middle !== null && shape(middle) === '[s1|*s4|s2|s3]',
+      middle ? shape(middle) : 'null'
+    )
+  }
+
+  // ── P24-2: 탭 닫기
+  {
+    const start = createLeaf('a')
+    const withB = addSurface(start, start.id, 'b')
+    const withC = withB ? addSurface(withB, start.id, 'c') : null
+    check('세 탭 준비', withC !== null && shape(withC) === '[a|b|*c]', withC ? shape(withC) : 'null')
+
+    /*
+     * 활성 탭을 닫으면 왼쪽으로 간다.
+     *
+     * 오른쪽으로 가면 연달아 닫을 때 커서가 목록 끝까지 밀려가고, 방금 보던
+     * 자리에서 점점 멀어진다.
+     */
+    const afterActive = withC ? closeSurface(withC, 'c') : null
+    check(
+      'P24-2 활성 탭을 닫으면 왼쪽으로',
+      afterActive !== null && shape(afterActive) === '[a|*b]',
+      afterActive ? shape(afterActive) : 'null'
+    )
+
+    // 왼쪽 탭을 닫아도 보고 있던 것은 그대로 보인다
+    const afterLeft = afterActive ? closeSurface(afterActive, 'a') : null
+    check(
+      'P24-2 왼쪽을 닫아도 보던 탭 유지',
+      afterLeft !== null && shape(afterLeft) === 'b',
+      afterLeft ? shape(afterLeft) : 'null'
+    )
+
+    // 마지막 탭을 닫으면 pane이, 마지막 pane이면 워크스페이스가 사라진다
+    check('P24-2 마지막 탭을 닫으면 null', afterLeft !== null && closeSurface(afterLeft, 'b') === null)
+  }
+
+  // 분할된 트리에서 탭 하나를 닫으면 그 pane만 사라진다
+  {
+    const root = createLeaf('s1')
+    const split = splitPane(root, root.id, 'row', 's2')
+    const withTab = split ? addSurface(split.root, split.newPaneId, 's3') : null
+    check(
+      '분할 + 탭',
+      withTab !== null && shape(withTab) === 'H(s1 [s2|*s3])',
+      withTab ? shape(withTab) : 'null'
+    )
+
+    const closed = withTab ? closeSurface(withTab, 's3') : null
+    check(
+      'P24-2 탭만 닫으면 pane은 남는다',
+      closed !== null && shape(closed) === 'H(s1 s2)',
+      closed ? shape(closed) : 'null'
+    )
+
+    const paneGone = closed ? closeSurface(closed, 's2') : null
+    check(
+      'P24-2 마지막 탭이면 pane이 사라진다',
+      paneGone !== null && shape(paneGone) === 's1',
+      paneGone ? shape(paneGone) : 'null'
+    )
+  }
+
+  // ── P24-3: 탭 순환은 끝에서 돌아간다
+  {
+    const base = createLeaf('a')
+    const paneId = base.id
+    const withB = addSurface(base, paneId, 'b') ?? base
+    const tree = selectSurface(addSurface(withB, paneId, 'c') ?? withB, paneId, 2)
+
+    check('P24-3 다음은 처음으로 돌아간다', shape(cycleSurface(tree, paneId, 1)) === '[*a|b|c]')
+    const first = selectSurface(tree, paneId, 0)
+    check('P24-3 이전은 끝으로 돌아간다', shape(cycleSurface(first, paneId, -1)) === '[a|b|*c]')
+
+    // 탭이 하나면 순환할 것이 없다
+    const single = createLeaf('only')
+    check('P24-3 탭 하나는 그대로', shape(cycleSurface(single, single.id, 1)) === 'only')
+  }
+
+  // ── P24-4: 숨은 탭도 세어야 한다
+  {
+    const base = createLeaf('a')
+    const tree = addSurface(base, base.id, 'b') ?? base
+
+    check('보이는 것만', collectSessionIds(tree).join(',') === 'b', collectSessionIds(tree).join(','))
+    /*
+     * 탭 뒤에 숨은 세션까지 세지 않으면 워크스페이스를 닫을 때 프로세스만 남는다.
+     */
+    check('P24-4 숨은 것까지', collectAllSurfaces(tree).join(',') === 'a,b', collectAllSurfaces(tree).join(','))
+    check('P24-4 숨은 탭으로도 잎을 찾는다', findLeafBySession(tree, 'a') !== null)
+  }
+
+  // ── 탭 순서 바꾸기
+  {
+    const base = createLeaf('a')
+    const paneId = base.id
+    const withB = addSurface(base, paneId, 'b') ?? base
+    const tree = selectSurface(addSurface(withB, paneId, 'c') ?? withB, paneId, 0)
+
+    const moved = moveSurface(tree, paneId, 0, 2)
+    check('탭을 끝으로 옮긴다', shape(moved) === '[b|c|*a]', shape(moved))
+
+    const other = moveSurface(selectSurface(tree, paneId, 1), paneId, 0, 2)
+    check('다른 탭을 옮기면 자리만 보정', shape(other) === '[*b|c|a]', shape(other))
+    check('범위 밖이면 그대로', shape(moveSurface(tree, paneId, 0, 9)) === shape(tree))
   }
 
   console.log(results.join('\n'))

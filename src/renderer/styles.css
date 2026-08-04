@@ -844,6 +844,132 @@ kbd {
   margin: 0;
 }
 
+/* ── pane 안의 가로 탭 (P24) ──────────────────────────────── */
+
+.pane-stack {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * 탭 바는 탭이 둘 이상일 때만 그린다 (P24-1).
+ *
+ * 하나뿐인데 탭 바가 있으면 세로 공간만 잡아먹고 아무것도 알려주지 않는다.
+ * 나누어 쓰지 않는 사용자에게는 이 구조가 아예 보이지 않아야 한다.
+ */
+.surface-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px 4px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  scrollbar-width: none;
+}
+
+.surface-tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.surface-tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.surface-tab:hover {
+  background: var(--bg-row);
+}
+
+.surface-tab.is-active {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* 미읽음은 탭 이름을 강조한다 — 뒤에 숨은 탭이 부르고 있다는 유일한 표시다. P24-4 */
+.surface-tab.is-unread {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.surface-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-tab-icon {
+  flex: none;
+  font-size: 10px;
+}
+
+/* 탭이 좁아도 상태는 보여야 한다 — 색 점 하나로 줄인다. P4 */
+.surface-tab-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--text-faint);
+  border-radius: 50%;
+}
+
+.surface-tab-dot.is-busy {
+  border-color: var(--busy);
+  background: var(--busy);
+}
+
+.surface-tab-dot.is-waiting,
+.surface-tab-dot.is-attention {
+  border-color: var(--waiting);
+  background: var(--waiting);
+}
+
+.surface-tab-dot.is-exited {
+  border-color: var(--done);
+  border-radius: 1px;
+}
+
+.surface-tab-close {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.surface-tab:hover .surface-tab-close,
+.surface-tab.is-active .surface-tab-close {
+  opacity: 1;
+}
+
+.surface-tab-close:hover {
+  background: var(--bg-row-active);
+  color: var(--text);
+}
+
 /* ── 내장 브라우저 (P23) ──────────────────────────────────── */
 
 .pane-browser {
