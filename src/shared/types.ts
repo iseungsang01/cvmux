@@ -81,6 +81,29 @@ export interface SessionMeta {
 }
 
 /**
+ * 내장 브라우저 화면 하나 (P23).
+ *
+ * 터미널 세션과 나란히 pane에 들어간다. 사이드바와 주소창이 같은 값을 보므로
+ * 상태는 여기 한 곳에만 있다.
+ */
+export interface BrowserMeta {
+  id: string
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
+/** 렌더러가 알려주는 자리. 네이티브 뷰가 여기 얹힌다. P23-2 */
+export interface BrowserRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
  * 워크스페이스 안의 pane 배치 (P17).
  *
  * 잎(leaf)이 터미널 하나, 가지(split)가 나눔이다. 분할하지 않으면 root가 곧
@@ -167,6 +190,12 @@ export const IPC = {
   CTL_REPLY: 'ctl:reply',
   /** 설정. P22 */
   CONFIG: 'config:get',
+  /** 내장 브라우저. P23 */
+  BROWSER_CREATE: 'browser:create',
+  BROWSER_PLACE: 'browser:place',
+  BROWSER_CLOSE: 'browser:close',
+  BROWSER_ACTION: 'browser:action',
+  BROWSER_LIST: 'browser:list',
   /** 알림함. P21 */
   NOTIFICATIONS: 'notify:list',
   NOTIFICATION_READ: 'notify:read',
@@ -187,8 +216,19 @@ export const IPC = {
   /** 알림함이 바뀌었다. P21 */
   EVT_NOTIFICATIONS: 'evt:notifications',
   /** 설정 파일이 바뀌었다. P22-4 */
-  EVT_CONFIG: 'evt:config'
+  EVT_CONFIG: 'evt:config',
+  /** 브라우저 화면의 주소·제목·로딩 상태가 바뀌었다. P23 */
+  EVT_BROWSER: 'evt:browser'
 } as const
+
+/** 주소창 버튼이 보내는 것들. P23-1 */
+export type BrowserAction =
+  | { kind: 'navigate'; url: string }
+  | { kind: 'back' }
+  | { kind: 'forward' }
+  | { kind: 'reload' }
+  | { kind: 'devtools' }
+  | { kind: 'focus' }
 
 /** 렌더러가 답해야 하는 제어 요청. P20-7 */
 export interface ControlAsk {
@@ -237,6 +277,13 @@ export interface CvmuxApi {
   /** 지금 적용된 설정. P22 */
   config(): Promise<CvmuxConfig>
 
+  /** 내장 브라우저. P23 */
+  browserCreate(url: string): Promise<BrowserMeta>
+  browserPlace(id: string, rect: BrowserRect | null): Promise<boolean>
+  browserClose(id: string): Promise<boolean>
+  browserAction(id: string, action: BrowserAction): Promise<boolean>
+  browserList(): Promise<BrowserMeta[]>
+
   /** 알림함. P21 */
   notifications(): Promise<Notification[]>
   notificationRead(id: string): Promise<boolean>
@@ -254,4 +301,5 @@ export interface CvmuxApi {
   onControlRequest(cb: (ask: ControlAsk) => void): () => void
   onNotifications(cb: (items: Notification[]) => void): () => void
   onConfig(cb: (config: CvmuxConfig) => void): () => void
+  onBrowser(cb: (meta: BrowserMeta) => void): () => void
 }

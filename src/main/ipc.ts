@@ -4,7 +4,15 @@ import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
-import { IPC, type CreateSessionOptions, type CvmuxConfig, type Workspace } from '@shared/types'
+import {
+  IPC,
+  type BrowserAction,
+  type BrowserRect,
+  type CreateSessionOptions,
+  type CvmuxConfig,
+  type Workspace
+} from '@shared/types'
+import type { BrowserManager } from './browser'
 import type { ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
 
@@ -66,11 +74,50 @@ export function registerIpc(
   notifier: Notifier,
   layout: LayoutStore,
   inbox: NotificationStore,
-  config: () => CvmuxConfig
+  config: () => CvmuxConfig,
+  browsers: BrowserManager
 ): ControlBridge {
   const bridge = new RendererBridge()
 
   ipcMain.handle(IPC.CONFIG, () => config())
+
+  // ── 내장 브라우저 (P23) ──────────────────────────────────────
+  ipcMain.handle(IPC.BROWSER_CREATE, (_event, url: unknown) =>
+    browsers.create(typeof url === 'string' ? url : 'about:blank')
+  )
+
+  ipcMain.handle(IPC.BROWSER_PLACE, (_event, id: unknown, rect: unknown) => {
+    if (typeof id !== 'string') return false
+    browsers.place(id, rect === null ? null : (rect as BrowserRect))
+    return true
+  })
+
+  ipcMain.handle(IPC.BROWSER_CLOSE, (_event, id: unknown) =>
+    typeof id === 'string' ? browsers.close(id) : false
+  )
+
+  ipcMain.handle(IPC.BROWSER_LIST, () => browsers.list())
+
+  ipcMain.handle(IPC.BROWSER_ACTION, (_event, id: unknown, action: unknown) => {
+    if (typeof id !== 'string' || typeof action !== 'object' || action === null) return false
+    const a = action as BrowserAction
+    switch (a.kind) {
+      case 'navigate':
+        return browsers.navigate(id, a.url)
+      case 'back':
+        return browsers.back(id)
+      case 'forward':
+        return browsers.forward(id)
+      case 'reload':
+        return browsers.reload(id)
+      case 'devtools':
+        return browsers.toggleDevTools(id)
+      case 'focus':
+        return browsers.focus(id)
+      default:
+        return false
+    }
+  })
 
   /** 사용자가 지금 보고 있는 세션. 토스트를 띄울지 판단에 쓴다. P15-2 */
   let activeSessionId: string | null = null

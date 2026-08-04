@@ -35,6 +35,8 @@ macOS를 쓴다면 cvmux 대신 cmux를 받는 편이 낫다 — 훨씬 완성�
   들여다보면 꺼지지만, 무엇을 알리려 했는지는 여기 남는다
 - **CLI와 소켓 API** — 세션 안에서 `cvmux`를 부르면 워크스페이스를 만들고,
   분할하고, 키를 보내고, 화면을 읽을 수 있다
+- **내장 브라우저** — 터미널 옆에 진짜 브라우저를 띄우고, 에이전트가 그것을 조종해
+  자기가 고친 화면을 직접 확인한다
 - **에이전트 이어서 띄우기** — 앱을 껐다 켜면 Claude Code 대화가 그 자리에서 이어진다
 - 설정 파일 · 단축키 커스터마이즈 · 명령 팔레트 · 찾기 · 분할 창 · 세션 영속성 ·
   한글 UTF-8 · 트루컬러
@@ -234,6 +236,47 @@ cvmux events --after 120               # 놓친 구간부터 따라잡기
 
 전체 명령은 `cvmux --help`에 있다. 프로토콜과 규칙은 [POLICY.md](./POLICY.md)의 P20.
 
+## 내장 브라우저
+
+터미널 옆에 진짜 브라우저를 pane으로 띄운다. `Ctrl+Shift+P` → "브라우저 열기",
+또는 CLI로.
+
+```powershell
+cvmux browser open localhost:5173
+```
+
+에이전트가 자기가 고친 화면을 직접 확인할 수 있다는 것이 요점이다. 좌표를 누를
+수도 없고 CSS 선택자는 페이지가 조금만 바뀌어도 어긋나므로,
+[agent-browser](https://github.com/vercel-labs/agent-browser)가 세운 방식을
+따른다 — **스냅샷이 각 요소에 이름을 붙이고, 조작은 그 이름을 가리킨다.**
+
+```powershell
+cvmux browser snapshot
+# - heading "브라우저 pane 확인" [e1]
+# - textbox "이름" [e2]
+# - button "보내기" [e3]
+
+cvmux browser fill e2 --value "승상"
+cvmux browser click e3
+cvmux browser get text --selector "#out"
+# value=안녕하세요, 승상님
+```
+
+`--selector`로 CSS를 직접 줄 수도 있다. 페이지가 바뀌어 이름이 가리키던 요소가
+사라지면 **"스냅샷을 다시 뜨세요"라고 답한다** — 엉뚱한 것을 누르는 것보다 낫다.
+
+```powershell
+cvmux browser wait "#done" --timeout 5000
+cvmux browser eval "document.title"
+cvmux browser screenshot        # PNG를 base64로
+```
+
+주소창에 친 것이 주소인지 검색어인지는 알아서 가른다. `localhost:5173`은
+주소이고 `버그 재현 방법`은 검색어다.
+
+창이 뒤에 가려져도 페이지는 계속 돈다 — 이 화면을 조종하는 것은 대개 뒤에서
+도는 에이전트이기 때문이다.
+
 ## 설정
 
 `%APPDATA%\cvmux\cvmux.json`을 읽는다(`~/.config/cvmux/cvmux.json`도 본다).
@@ -366,6 +409,7 @@ Select-String -Path src\*\*.ts,src\*\*\*.tsx -Pattern 'P\d+-\d+'
 - 대용량 붙여넣기 확인, bracketed paste
 
 **아직 안 되는 것** — PR 상태 표시(네트워크 호출과 인증이 필요하다), SSH 워크스페이스.
+에이전트 훅 자동 설치는 Claude Code만 한다 — 다른 에이전트는 한 줄을 직접 걸면 된다.
 
 ## 구조
 
@@ -382,6 +426,8 @@ src/
   main/                Electron 메인 프로세스 — PTY를 직접 소유한다
     ipc.ts             렌더러 ↔ PtyManager 중계, 제어 소켓 다리 (P20-7)
     control-socket.ts  named pipe 제어 서버 (P20)
+    browser.ts         내장 브라우저 화면 관리 (P23)
+    browser-agent.ts   페이지 안에서 도는 조작 코드 (P23-3)
     tray.ts            트레이 상주 (P18)
   cli/                 cvmux 명령줄 도구 (P20-1)
   preload/             contextBridge 화이트리스트 API

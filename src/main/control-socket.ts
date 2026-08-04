@@ -3,6 +3,16 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 
+import type { BrowserManager } from './browser'
+import {
+  clickScript,
+  fillScript,
+  getScript,
+  pressScript,
+  snapshotScript,
+  unwrapError,
+  waitScript
+} from './browser-agent'
 import type { ConfigSnapshot } from '@core/config-store'
 import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
@@ -38,6 +48,8 @@ export interface ControlHost {
   bridge: ControlBridge
   /** 알림함. 목록과 읽음 처리는 main이 답한다. P21 */
   inbox: NotificationStore
+  /** 내장 브라우저. 화면 자체는 main이 들고 있다. P23 */
+  browsers: BrowserManager
   /** 창을 앞으로 가져온다 — `cvmux open`과 `app.focus`가 쓴다 */
   showWindow(): void
   /** 설정 파일을 다시 읽는다. P22-6 */
@@ -393,6 +405,86 @@ export class ControlSocketServer {
         return { ...(result as Record<string, unknown>), notification_id: latest.id }
       }
 
+      // ── 내장 브라우저 (P23-3) ────────────────────────────────
+      case M.BROWSER_LIST:
+        return { browsers: this.host.browsers.list() }
+
+      case M.BROWSER_GOTO: {
+        const id = this.browser(params)
+        const url = String(params.url ?? params.to ?? '')
+        if (!url) throw new ControlError('invalid_params', '주소가 필요합니다')
+        this.host.browsers.navigate(id, url)
+        return { id, url }
+      }
+
+      case M.BROWSER_BACK:
+        return { moved: this.host.browsers.back(this.browser(params)) }
+      case M.BROWSER_FORWARD:
+        return { moved: this.host.browsers.forward(this.browser(params)) }
+      case M.BROWSER_RELOAD:
+        return { reloaded: this.host.browsers.reload(this.browser(params)) }
+
+      case M.BROWSER_CLOSE: {
+        const id = this.browser(params)
+        // 화면을 닫으면 그 pane도 없어져야 한다 — 렌더러가 트리를 정리한다
+        await this.host.bridge.call('browser.closed', { browser: id }).catch(() => undefined)
+        return { closed: this.host.browsers.close(id) }
+      }
+
+      case M.BROWSER_SNAPSHOT:
+        return this.inPage(this.browser(params), snapshotScript(Number(params.limit ?? 400)))
+
+      case M.BROWSER_EVAL: {
+        const code = String(params.code ?? params.script ?? '')
+        if (!code) throw new ControlError('invalid_params', '실행할 코드가 필요합니다')
+        return { result: await this.host.browsers.evaluate(this.browser(params), code) }
+      }
+
+      case M.BROWSER_CLICK:
+        return this.inPage(
+          this.browser(params),
+          clickScript(optional(params.ref), optional(params.selector))
+        )
+
+      case M.BROWSER_FILL:
+        return this.inPage(
+          this.browser(params),
+          fillScript(String(params.value ?? ''), optional(params.ref), optional(params.selector))
+        )
+
+      case M.BROWSER_PRESS: {
+        const key = String(params.key ?? '')
+        if (!key) throw new ControlError('invalid_params', '키가 필요합니다')
+        return this.inPage(
+          this.browser(params),
+          pressScript(key, optional(params.ref), optional(params.selector))
+        )
+      }
+
+      case M.BROWSER_GET:
+        return {
+          value: await this.inPage(
+            this.browser(params),
+            getScript(String(params.what ?? 'url'), optional(params.ref), optional(params.selector))
+          )
+        }
+
+      case M.BROWSER_WAIT: {
+        const kind = optional(params.selector)
+          ? 'selector'
+          : optional(params.text)
+            ? 'text'
+            : 'load'
+        const value = String(params.selector ?? params.text ?? '')
+        return this.inPage(
+          this.browser(params),
+          waitScript(kind, value, Number(params.timeout ?? 10_000))
+        )
+      }
+
+      case M.BROWSER_SCREENSHOT:
+        return { png_base64: await this.host.browsers.screenshot(this.browser(params)) }
+
       case M.APP_FOCUS:
         this.host.showWindow()
         return { focused: true }
@@ -474,10 +566,53 @@ export class ControlSocketServer {
     return found
   }
 
+  /**
+   * 페이지에서 코드를 돌리고 오류를 되살린다 (P23-7).
+   *
+   * 스크립트가 던진 메시지는 `executeJavaScript`를 지나며 사라진다. 감싸서
+   * 값으로 받아 온 것을 여기서 다시 오류로 세운다 — 에이전트에게 "그 요소가
+   * 더 이상 없으니 스냅샷을 다시 뜨라"고 말해 줄 수 있어야 한다.
+   */
+  private async inPage(id: string, script: string): Promise<unknown> {
+    const result = await this.host.browsers.evaluate(id, script)
+    const message = unwrapError(result)
+    if (message !== null) throw new ControlError('invalid_state', message)
+    return result
+  }
+
+  /**
+   * 브라우저 화면 지정 (P23-3).
+   *
+   * 인자가 없으면 딱 하나 열려 있을 때만 그것을 쓴다. 여럿일 때 아무거나
+   * 고르면 스크립트가 조용히 엉뚱한 화면을 조작한다 — P20-4와 같은 이유다.
+   */
+  private browser(params: Record<string, unknown>): string {
+    const browsers = this.host.browsers.list()
+    const ref = params.browser ?? params.surface ?? params.id
+    if (ref === undefined || ref === null || ref === '') {
+      if (browsers.length === 1) return browsers[0].id
+      if (browsers.length === 0) {
+        throw new ControlError('not_found', '열린 브라우저 화면이 없습니다')
+      }
+      throw new ControlError(
+        'invalid_params',
+        `브라우저 화면이 ${browsers.length}개입니다. --browser로 지정하세요`
+      )
+    }
+    const found = resolveHandle(browsers, String(ref), 'browser')
+    if (!found) throw new ControlError('not_found', `브라우저 화면을 찾을 수 없습니다: ${String(ref)}`)
+    return found.id
+  }
+
   /** 렌더러가 이벤트를 넣을 때 쓰는 id 발급기 */
   takeId(): number {
     return this.nextId++
   }
+}
+
+function optional(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  return String(value)
 }
 
 const STREAMING = Symbol('streaming')

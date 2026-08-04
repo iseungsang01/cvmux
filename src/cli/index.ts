@@ -458,6 +458,81 @@ async function run(
         query: str(flags, 'query') ?? args[1]
       })
 
+    /*
+     * ── 내장 브라우저 (P23-3) ─────────────────────────────────
+     *
+     * 하위 명령 이름은 cmux의 `browser …`를 그대로 따른다. 에이전트가 쓰는
+     * 방식도 같다 — `snapshot`으로 요소에 이름을 받고, 그 이름을 눌러 조작한다.
+     */
+    case 'browser': {
+      const sub = args[0] ?? 'list'
+      const target = { browser: str(flags, 'browser') ?? str(flags, 'surface') }
+      const ref = str(flags, 'ref')
+      const selector = str(flags, 'selector')
+
+      switch (sub) {
+        case 'open':
+        case 'new':
+          return client.call(M.BROWSER_OPEN, {
+            url: args[1] ?? str(flags, 'url'),
+            direction: str(flags, 'direction') ?? 'right'
+          })
+        case 'list':
+          return client.call(M.BROWSER_LIST)
+        case 'goto':
+        case 'navigate':
+          return client.call(M.BROWSER_GOTO, { ...target, url: args[1] ?? str(flags, 'url') })
+        case 'back':
+          return client.call(M.BROWSER_BACK, target)
+        case 'forward':
+          return client.call(M.BROWSER_FORWARD, target)
+        case 'reload':
+          return client.call(M.BROWSER_RELOAD, target)
+        case 'close':
+          return client.call(M.BROWSER_CLOSE, target)
+        case 'snapshot':
+          return client.call(M.BROWSER_SNAPSHOT, { ...target, limit: str(flags, 'limit') })
+        case 'eval':
+          return client.call(M.BROWSER_EVAL, { ...target, code: args.slice(1).join(' ') })
+        case 'click':
+          return client.call(M.BROWSER_CLICK, { ...target, ref: ref ?? args[1], selector })
+        case 'fill':
+        case 'type':
+          return client.call(M.BROWSER_FILL, {
+            ...target,
+            ref: ref ?? args[1],
+            selector,
+            value: str(flags, 'value') ?? args.slice(2).join(' ')
+          })
+        case 'press':
+        case 'key':
+          return client.call(M.BROWSER_PRESS, {
+            ...target,
+            ref,
+            selector,
+            key: str(flags, 'key') ?? args[1] ?? ''
+          })
+        case 'get':
+          return client.call(M.BROWSER_GET, {
+            ...target,
+            what: args[1] ?? 'url',
+            ref,
+            selector
+          })
+        case 'wait':
+          return client.call(M.BROWSER_WAIT, {
+            ...target,
+            selector: selector ?? args[1],
+            text: str(flags, 'text'),
+            timeout: str(flags, 'timeout')
+          })
+        case 'screenshot':
+          return client.call(M.BROWSER_SCREENSHOT, target)
+        default:
+          throw new CliError(`모르는 하위 명령: browser ${sub}`)
+      }
+    }
+
     // ── 기타 ────────────────────────────────────────────────────
     case 'open': {
       const path = args[0]

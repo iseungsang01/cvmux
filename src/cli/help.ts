@@ -65,6 +65,20 @@ pane:
   panel <이름>           알림함·팔레트·찾기 열기 (notifications|palette|find)
                          --close로 닫고, find는 --scope all로 전체 검색
 
+브라우저:
+  browser open [url]     터미널 옆에 브라우저 pane 열기 (--direction)
+  browser list           열린 화면 목록
+  browser goto <url>     주소 이동 (back|forward|reload도 있다)
+  browser snapshot       요소마다 이름(e12)이 붙은 화면 구조
+  browser click <ref>    그 이름을 누른다 (--selector도 받는다)
+  browser fill <ref> <값>  입력란 채우기
+  browser press <key>    키 하나
+  browser get <무엇>     url|title|text|html|value|box
+  browser wait <selector>  나타날 때까지 (--text, --timeout)
+  browser eval <코드>    페이지에서 자바스크립트 실행
+  browser screenshot     PNG를 base64로
+  browser close          닫기
+
 설정:
   config path            설정 파일 자리
   config init            주석이 달린 본보기 만들기
@@ -122,6 +136,8 @@ const USAGE: Record<string, string> = {
   'open-notification': 'Usage: cvmux open-notification [handle]',
   'jump-to-unread': 'Usage: cvmux jump-to-unread',
   panel: 'Usage: cvmux panel <notifications|palette|find> [query] [--close] [--scope all] [--query <text>]',
+  browser:
+    'Usage: cvmux browser <open|list|goto|back|forward|reload|snapshot|click|fill|press|get|wait|eval|screenshot|close> [args] [--browser <handle>] [--ref <e12>] [--selector <css>]',
   config: 'Usage: cvmux config <path|init|doctor|reload> [--path <file>] [--json]',
   hooks: 'Usage: cvmux hooks <setup|uninstall|status|record|notify> [--agent <name>]',
   open: 'Usage: cvmux open <path>',

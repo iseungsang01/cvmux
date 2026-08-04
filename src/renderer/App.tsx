@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 
 import { DEFAULT_CONFIG, type CvmuxConfig } from '@shared/config'
 import { actionFor, compileBindings, formatChord, type Chord } from '@shared/keys'
-import type { Notification, SessionMeta, Workspace } from '@shared/types'
+import type { BrowserMeta, Notification, SessionMeta, Workspace } from '@shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { FindBar, type FindHit } from './components/FindBar'
 import { NotificationPanel } from './components/NotificationPanel'
@@ -47,6 +47,8 @@ export function App(): JSX.Element {
   const [inboxOpen, setInboxOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [config, setConfig] = useState<CvmuxConfig>(DEFAULT_CONFIG)
+  /** 열려 있는 내장 브라우저 화면. 잎이 가리키는 id가 여기 있으면 브라우저다. P23-2 */
+  const [browsers, setBrowsers] = useState<Map<string, BrowserMeta>>(() => new Map())
   const [find, setFind] = useState<{
     open: boolean
     query: string
@@ -60,6 +62,7 @@ export function App(): JSX.Element {
   const workspacesRef = useRef<Workspace[]>([])
   const sessionsRef = useRef<SessionMeta[]>([])
   const composingRef = useRef(false)
+  const browsersRef = useRef<Map<string, BrowserMeta>>(new Map())
 
   /**
    * 동작 실행기 (P22-5).
@@ -74,6 +77,7 @@ export function App(): JSX.Element {
   activeIdRef.current = activeId
   workspacesRef.current = workspaces
   sessionsRef.current = sessions
+  browsersRef.current = browsers
 
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications])
@@ -183,20 +187,62 @@ export function App(): JSX.Element {
     [splitPaneIn]
   )
 
+  /**
+   * 잎 하나를 트리에서 걷어낸다 (P17-3 / P17-4).
+   *
+   * 세션이 죽었을 때와 브라우저를 닫았을 때가 같은 길을 쓴다 — 배치를 다루는
+   * 코드가 둘을 구분할 이유가 없다.
+   */
+  const dropSurface = useCallback((surfaceId: string): void => {
+    setWorkspaces((prev) =>
+      prev.flatMap((workspace) => {
+        const leaf = findLeafBySession(workspace.root, surfaceId)
+        if (!leaf) return [workspace]
+        const next = closePane(workspace.root, leaf.id)
+        if (next === null) return []
+        const stillThere = findLeaf(next, workspace.focusedPaneId) !== null
+        return [
+          {
+            ...workspace,
+            root: next,
+            focusedPaneId: stillThere ? workspace.focusedPaneId : firstLeafId(next)
+          }
+        ]
+      })
+    )
+  }, [])
+
+  /** 터미널이든 브라우저든 이 id가 가리키는 것을 끝낸다. P23-2 */
+  const closeSurface = useCallback(
+    (surfaceId: string): void => {
+      if (browsersRef.current.has(surfaceId)) {
+        void window.cvmux.browserClose(surfaceId)
+        // 브라우저에는 세션 종료 이벤트가 없다 — 여기서 직접 걷어낸다
+        dropSurface(surfaceId)
+        return
+      }
+      void window.cvmux.close(surfaceId)
+    },
+    [dropSurface]
+  )
+
   /** 포커스된 pane을 닫는다. 세션을 끝내면 onClosed가 트리를 정리한다. P17-3 */
   const closeFocusedPane = useCallback((): void => {
     const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
     if (!workspace) return
     const sessionId = focusedSessionId(workspace)
-    if (sessionId !== null) void window.cvmux.close(sessionId)
-  }, [])
+    if (sessionId !== null) closeSurface(sessionId)
+  }, [closeSurface])
 
-  const closeWorkspace = useCallback((workspaceId: string): void => {
-    const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
-    if (!workspace) return
-    // 워크스페이스를 닫으면 그 안의 pane 전부를 끝낸다
-    for (const leaf of paneSessionIds(workspace)) void window.cvmux.close(leaf)
-  }, [])
+  const closeWorkspace = useCallback(
+    (workspaceId: string): void => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) return
+      // 워크스페이스를 닫으면 그 안의 pane 전부를 끝낸다
+      for (const leaf of paneSessionIds(workspace)) closeSurface(leaf)
+    },
+    [closeSurface]
+  )
 
   // ── 초기 로드 ────────────────────────────────────────────────
   useEffect(() => {
@@ -252,22 +298,7 @@ export function App(): JSX.Element {
       setSessions((prev) => prev.filter((s) => s.id !== id))
       // 세션이 끝나면 그 pane을 트리에서 걷어낸다. 마지막 pane이었다면
       // 워크스페이스 자체가 사라진다. P17-3 / P17-4
-      setWorkspaces((prev) =>
-        prev.flatMap((workspace) => {
-          const leaf = findLeafBySession(workspace.root, id)
-          if (!leaf) return [workspace]
-          const next = closePane(workspace.root, leaf.id)
-          if (next === null) return []
-          const stillThere = findLeaf(next, workspace.focusedPaneId) !== null
-          return [
-            {
-              ...workspace,
-              root: next,
-              focusedPaneId: stillThere ? workspace.focusedPaneId : firstLeafId(next)
-            }
-          ]
-        })
-      )
+      dropSurface(id)
     })
 
     // 종료 자체는 meta 이벤트로도 전달된다. 여기서는 별도 처리가 없다. P1-1
@@ -542,6 +573,46 @@ export function App(): JSX.Element {
     setFind((prev) => ({ ...prev, open: true, scope, index: 0, count: 0 }))
   }, [])
 
+  // ── 내장 브라우저 (P23) ──────────────────────────────────────
+  useEffect(() => {
+    void window.cvmux.browserList().then((list) => {
+      setBrowsers(new Map(list.map((b) => [b.id, b])))
+    })
+    // 주소·제목·로딩이 바뀔 때마다 그 화면만 갈아 끼운다
+    return window.cvmux.onBrowser((meta) => {
+      setBrowsers((prev) => new Map(prev).set(meta.id, meta))
+    })
+  }, [])
+
+  /**
+   * 브라우저를 pane으로 연다 (P23-1).
+   *
+   * 터미널 옆에 두는 것이 이 기능의 요점이므로 기본은 **오른쪽 분할**이다.
+   * 에이전트가 고친 화면을 보면서 셸을 그대로 쓸 수 있어야 한다.
+   */
+  const openBrowser = useCallback(
+    async (url: string, direction: 'row' | 'column' = 'row'): Promise<string> => {
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) throw new Error('열린 워크스페이스가 없습니다.')
+
+      const meta = await window.cvmux.browserCreate(url)
+      setBrowsers((prev) => new Map(prev).set(meta.id, meta))
+
+      const split = splitPane(workspace.root, workspace.focusedPaneId, direction, meta.id)
+      if (!split) {
+        void window.cvmux.browserClose(meta.id)
+        throw new Error('나눌 pane이 사라졌습니다.')
+      }
+      setWorkspaces((prev) =>
+        prev.map((w) =>
+          w.id === workspace.id ? { ...w, root: split.root, focusedPaneId: split.newPaneId } : w
+        )
+      )
+      return meta.id
+    },
+    []
+  )
+
   // ── 설정 (P22) ───────────────────────────────────────────────
   useEffect(() => {
     void window.cvmux.config().then(setConfig)
@@ -680,6 +751,14 @@ export function App(): JSX.Element {
         run: () => void window.cvmux.notificationsClear('read')
       },
       {
+        id: 'browser.open',
+        title: '브라우저 열기',
+        keywords: 'browser open web preview page',
+        hint: hint('browser.open'),
+        section: '브라우저',
+        run: () => void openBrowser('about:blank').catch(() => undefined)
+      },
+      {
         id: 'view.sidebar',
         title: sidebarCollapsed ? '사이드바 펴기' : '사이드바 접기',
         keywords: 'sidebar toggle view',
@@ -713,6 +792,7 @@ export function App(): JSX.Element {
     hint,
     jumpToUnread,
     notifications,
+    openBrowser,
     openFind,
     sessionMap,
     sidebarCollapsed,
@@ -768,9 +848,9 @@ export function App(): JSX.Element {
       rename: renameWorkspace,
       split: splitPaneIn,
       focusPane: focusPaneIn,
-      closeSession: (id) => {
-        void window.cvmux.close(id)
-      },
+      closeSession: closeSurface,
+      openBrowser: (url, direction) => openBrowser(url, direction),
+      dropSurface,
       markRead: (id) => {
         void window.cvmux.markRead(id)
       },
@@ -796,7 +876,18 @@ export function App(): JSX.Element {
           )
       )
     })
-  }, [closeFind, closeWorkspace, createWorkspace, focusPaneIn, openFind, renameWorkspace, splitPaneIn])
+  }, [
+    closeFind,
+    closeSurface,
+    closeWorkspace,
+    createWorkspace,
+    dropSurface,
+    focusPaneIn,
+    openBrowser,
+    openFind,
+    renameWorkspace,
+    splitPaneIn
+  ])
 
   return (
     <div className={`app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
@@ -908,6 +999,7 @@ export function App(): JSX.Element {
                   <PaneTree
                     node={workspace.root}
                     sessions={sessionMap}
+                    browsers={browsers}
                     host={host}
                     focusedPaneId={workspace.focusedPaneId}
                     visible={workspace.id === activeId}

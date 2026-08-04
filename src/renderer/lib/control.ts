@@ -28,6 +28,10 @@ export interface ControlContext {
   focusPane(workspaceId: string, paneId: string): void
   closeSession(sessionId: string): void
   markRead(sessionId: string): void
+  /** 내장 브라우저를 pane으로 연다. P23-1 */
+  openBrowser(url: string, direction: 'row' | 'column'): Promise<string>
+  /** 잎 하나를 트리에서 걷어낸다 — 브라우저를 소켓에서 닫았을 때. P23-2 */
+  dropSurface(surfaceId: string): void
   /** 알림함·팔레트·찾기를 열고 닫는다. P21-11 */
   setPanel(
     panel: 'notifications' | 'palette' | 'find',
@@ -170,6 +174,30 @@ export async function handleControl(
       const query = optionalString(params.query)
       ctx.setPanel(panel, open, scope, query)
       return { panel, open, scope, query: query ?? null }
+    }
+
+    /*
+     * 브라우저 열기 (P23-1).
+     *
+     * 화면 자체는 main이 만들지만 그것이 어느 pane에 놓이는지는 렌더러만 안다.
+     * 기본은 오른쪽 분할이다 — 터미널 옆에 두는 것이 이 기능의 요점이므로.
+     */
+    case M.BROWSER_OPEN: {
+      const url = optionalString(params.url) ?? 'about:blank'
+      const raw = String(params.direction ?? 'right')
+      const direction = splitDirection(raw)
+      if (direction === null) {
+        throw new ControlRequestError(`방향은 right/left/down/up 중 하나여야 합니다: ${raw}`)
+      }
+      const id = await ctx.openBrowser(url, direction)
+      return { id, url }
+    }
+
+    // main이 브라우저를 닫았다 — 그 pane도 없어져야 한다
+    case 'browser.closed': {
+      const id = optionalString(params.browser)
+      if (id !== undefined) ctx.dropSurface(id)
+      return { dropped: id ?? null }
     }
 
     case M.APP_OPEN: {

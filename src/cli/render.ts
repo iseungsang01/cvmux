@@ -58,12 +58,18 @@ function rows(value: unknown): Row[] {
   return Array.isArray(value) ? (value as Row[]) : []
 }
 
-/** 한 줄짜리 결과는 굳이 표로 만들지 않는다 */
+/**
+ * 한 줄짜리 결과는 굳이 표로 만들지 않는다.
+ *
+ * 참/거짓은 `true`/`false`로 적는다. 표에서 쓰는 점은 칸이 비어 있는 것과
+ * 거짓을 눈으로 구분할 수 있지만, `key=` 뒤에 아무것도 없으면 값이 없는 것인지
+ * 거짓인지 알 수 없다.
+ */
 function summarize(value: Row): string {
   if (value === null || typeof value !== 'object') return String(value)
   const parts = Object.entries(value)
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
-    .map(([k, v]) => `${k}=${format(v)}`)
+    .map(([k, v]) => `${k}=${typeof v === 'boolean' ? String(v) : format(v)}`)
   return parts.length > 0 ? parts.join('  ') : 'ok'
 }
 

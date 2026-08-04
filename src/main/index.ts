@@ -10,6 +10,7 @@ import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
 import { POLICY } from '@shared/policy'
 import { IPC, type Workspace } from '@shared/types'
+import { BrowserManager } from './browser'
 import { ControlSocketServer, pipePathFor } from './control-socket'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
@@ -78,6 +79,17 @@ const configStore = new ConfigStore((snapshot) => {
 
 /** 에이전트 대화 기록. 훅이 적고 복원이 읽는다. P22-8 */
 const agentSessions = new AgentSessionStore()
+
+/**
+ * 내장 브라우저 (P23).
+ *
+ * 화면은 창에 직접 얹히는 네이티브 뷰라 main이 들고 있다. 어디에 놓일지는
+ * 렌더러가 알려 준다(P23-2).
+ */
+const browsers = new BrowserManager({
+  window: () => mainWindow,
+  onChange: (meta) => broadcast(IPC.EVT_BROWSER, meta)
+})
 
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -343,7 +355,8 @@ if (!app.requestSingleInstanceLock()) {
         }
       },
       inbox,
-      () => configStore.current.config
+      () => configStore.current.config,
+      browsers
     )
 
     /*
@@ -358,6 +371,7 @@ if (!app.requestSingleInstanceLock()) {
         manager,
         bridge,
         inbox,
+        browsers,
         showWindow,
         reloadConfig: (): ConfigSnapshot => {
           const snapshot = configStore.reload()
@@ -447,6 +461,9 @@ app.on('before-quit', (event) => {
   // 파이프와 접속 정보를 남기지 않는다 — 꺼진 앱을 가리키는 주소는 거짓말이다. P20-2
   control?.stop()
   control = null
+
+  // 네이티브 뷰는 창보다 오래 살 수 있다. 앱이 끝나기 전에 거둔다. P23-2
+  browsers.closeAll()
 
   if (persistTimer !== null) {
     clearInterval(persistTimer)

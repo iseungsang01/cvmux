@@ -844,6 +844,63 @@ kbd {
   margin: 0;
 }
 
+/* ── 내장 브라우저 (P23) ──────────────────────────────────── */
+
+.pane-browser {
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-chrome {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.browser-url {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.browser-url:focus {
+  border-color: var(--accent);
+}
+
+/*
+ * 페이지가 얹힐 자리.
+ *
+ * 비어 있는 것이 맞다 — 여기 무엇을 그려도 네이티브 뷰 뒤에 가려 보이지
+ * 않는다(P23-2). 배경만 페이지와 비슷하게 두어, 뷰가 붙기 전 한 프레임 동안
+ * 검은 사각형이 번쩍이지 않게 한다.
+ */
+.browser-hold {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.browser-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #99a;
+  font-size: 12px;
+}
+
 /* ── 버튼 ─────────────────────────────────────────────────── */
 
 .icon-button {

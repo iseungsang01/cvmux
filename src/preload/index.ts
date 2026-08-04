@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import {
   IPC,
+  type BrowserMeta,
   type ClipboardContent,
   type ControlAsk,
   type CreateSessionOptions,
@@ -55,6 +56,12 @@ const api: CvmuxApi = {
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
   config: () => ipcRenderer.invoke(IPC.CONFIG) as Promise<CvmuxConfig>,
+  browserCreate: (url) => ipcRenderer.invoke(IPC.BROWSER_CREATE, url) as Promise<BrowserMeta>,
+  browserPlace: (id, rect) => ipcRenderer.invoke(IPC.BROWSER_PLACE, id, rect) as Promise<boolean>,
+  browserClose: (id) => ipcRenderer.invoke(IPC.BROWSER_CLOSE, id) as Promise<boolean>,
+  browserAction: (id, action) =>
+    ipcRenderer.invoke(IPC.BROWSER_ACTION, id, action) as Promise<boolean>,
+  browserList: () => ipcRenderer.invoke(IPC.BROWSER_LIST) as Promise<BrowserMeta[]>,
   notifications: () => ipcRenderer.invoke(IPC.NOTIFICATIONS) as Promise<Notification[]>,
   notificationRead: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_READ, id) as Promise<boolean>,
   notificationUnread: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_UNREAD, id) as Promise<boolean>,
@@ -70,7 +77,8 @@ const api: CvmuxApi = {
   onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb),
   onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb),
   onNotifications: (cb) => subscribe<[Notification[]]>(IPC.EVT_NOTIFICATIONS, cb),
-  onConfig: (cb) => subscribe<[CvmuxConfig]>(IPC.EVT_CONFIG, cb)
+  onConfig: (cb) => subscribe<[CvmuxConfig]>(IPC.EVT_CONFIG, cb),
+  onBrowser: (cb) => subscribe<[BrowserMeta]>(IPC.EVT_BROWSER, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

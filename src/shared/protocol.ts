@@ -166,6 +166,23 @@ export const M = {
   NOTIFICATION_OPEN: 'notification.open',
   NOTIFICATION_JUMP_UNREAD: 'notification.jump-to-unread',
 
+  /** 내장 브라우저 (P23). 이름은 cmux의 `browser …` 하위 명령을 그대로 따른다 */
+  BROWSER_OPEN: 'browser.open',
+  BROWSER_LIST: 'browser.list',
+  BROWSER_GOTO: 'browser.goto',
+  BROWSER_BACK: 'browser.back',
+  BROWSER_FORWARD: 'browser.forward',
+  BROWSER_RELOAD: 'browser.reload',
+  BROWSER_CLOSE: 'browser.close',
+  BROWSER_SNAPSHOT: 'browser.snapshot',
+  BROWSER_EVAL: 'browser.eval',
+  BROWSER_CLICK: 'browser.click',
+  BROWSER_FILL: 'browser.fill',
+  BROWSER_PRESS: 'browser.press',
+  BROWSER_GET: 'browser.get',
+  BROWSER_WAIT: 'browser.wait',
+  BROWSER_SCREENSHOT: 'browser.screenshot',
+
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',
   /** 설정 파일을 다시 읽는다. P22-6 */
@@ -202,7 +219,14 @@ export const RENDERER_METHODS: ReadonlySet<string> = new Set<string>([
    */
   M.NOTIFICATION_OPEN,
   M.APP_OPEN,
-  M.APP_PANEL
+  M.APP_PANEL,
+  /*
+   * 브라우저를 **여는 것**만 렌더러 몫이다 (P23-2).
+   *
+   * 화면 자체는 main이 들고 있지만, 그것이 어느 pane에 놓이는지는 렌더러만
+   * 안다. 연 뒤의 조작(goto·click·snapshot)은 전부 main에서 바로 답한다.
+   */
+  M.BROWSER_OPEN
 ])
 
 /** 이벤트 이름. 이름 필터(`--name`)가 쓰는 값이기도 하다 */

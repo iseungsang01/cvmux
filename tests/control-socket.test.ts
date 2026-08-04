@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import { NotificationStore } from '../src/core/notifications'
 import { DEFAULT_CONFIG } from '../src/shared/config'
+import type { BrowserManager } from '../src/main/browser'
 import type { PtyManager } from '../src/core/pty-manager'
 import type { SessionMeta } from '../src/shared/types'
 import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
@@ -175,6 +176,8 @@ async function main(): Promise<void> {
               : Promise.reject(new Error('창이 없습니다'))
       },
       inbox,
+      // 브라우저는 이 테스트의 대상이 아니다 — 목록이 비어 있는 것으로 충분하다
+      browsers: { list: () => [] } as unknown as BrowserManager,
       showWindow: () => {
         focused++
       },

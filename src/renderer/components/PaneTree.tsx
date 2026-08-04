@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 
-import type { PaneNode, SessionMeta } from '@shared/types'
+import type { BrowserMeta, PaneNode, SessionMeta } from '@shared/types'
 import { exitLabel, isFailedExit } from '../lib/format'
 import type { TerminalHost } from '../terminal-host'
+import { BrowserPane } from './BrowserPane'
 
 /**
  * 워크스페이스 안의 pane 배치를 그린다 (POLICY.md P17).
@@ -18,6 +19,8 @@ const MIN_PANE_PX = 120
 interface PaneTreeProps {
   node: PaneNode
   sessions: Map<string, SessionMeta>
+  /** 내장 브라우저 화면들. 잎이 가리키는 id가 여기 있으면 브라우저다. P23-2 */
+  browsers: Map<string, BrowserMeta>
   host: TerminalHost
   focusedPaneId: string
   /** 이 워크스페이스가 지금 화면에 보이는가 */
@@ -27,9 +30,28 @@ interface PaneTreeProps {
 }
 
 export function PaneTree(props: PaneTreeProps): JSX.Element | null {
-  const { node, sessions, host, focusedPaneId, visible, onFocusPane, onResize } = props
+  const { node, sessions, browsers, host, focusedPaneId, visible, onFocusPane, onResize } = props
 
   if (node.kind === 'leaf') {
+    /*
+     * 잎 하나는 터미널이거나 브라우저다 (P23-2).
+     *
+     * 트리에 종류를 따로 적지 않고 id가 어느 목록에 있는지로 가른다 — 배치를
+     * 다루는 코드(분할·닫기·복원)가 둘을 구분할 이유가 없기 때문이다.
+     */
+    const browser = browsers.get(node.sessionId)
+    if (browser) {
+      return (
+        <BrowserPane
+          paneId={node.id}
+          meta={browser}
+          focused={node.id === focusedPaneId}
+          visible={visible}
+          onFocus={onFocusPane}
+        />
+      )
+    }
+
     const session = sessions.get(node.sessionId)
     if (!session) return null
     return (
