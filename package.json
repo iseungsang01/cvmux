@@ -13,16 +13,19 @@
     "start": "electron-vite preview",
     "package": "npm run build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "npm run test:state && npm run test:layout && npm run test:format && npm run test:tree && npm run test:protocol && npm run test:socket",
+    "test": "npm run test:state && npm run test:layout && npm run test:format && npm run test:tree && npm run test:protocol && npm run test:socket && npm run test:palette && npm run test:inbox",
     "test:state": "esbuild tests/session-state.test.ts --bundle --platform=node --format=esm --outfile=out/tests/session-state.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/session-state.mjs",
     "test:layout": "esbuild tests/layout.test.ts --bundle --platform=node --format=esm --outfile=out/tests/layout.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/layout.mjs",
     "test:format": "esbuild tests/format.test.ts --bundle --platform=node --format=esm --outfile=out/tests/format.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/format.mjs",
     "test:tree": "esbuild tests/process-tree.test.ts --bundle --platform=node --format=esm --outfile=out/tests/process-tree.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/process-tree.mjs",
     "test:socket": "esbuild tests/control-socket.test.ts --bundle --platform=node --format=esm --outfile=out/tests/control-socket.mjs --external:electron --external:node-pty --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --alias:@shared/protocol=./src/shared/protocol --alias:@core/pty-manager=./src/core/pty-manager --log-level=warning && node out/tests/control-socket.mjs",
-    "test:protocol": "esbuild tests/protocol.test.ts --bundle --platform=node --format=esm --outfile=out/tests/protocol.mjs --external:electron --external:node-pty --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --alias:@shared/protocol=./src/shared/protocol --alias:@core/pty-manager=./src/core/pty-manager --log-level=warning && node out/tests/protocol.mjs"
+    "test:protocol": "esbuild tests/protocol.test.ts --bundle --platform=node --format=esm --outfile=out/tests/protocol.mjs --external:electron --external:node-pty --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --alias:@shared/protocol=./src/shared/protocol --alias:@core/pty-manager=./src/core/pty-manager --log-level=warning && node out/tests/protocol.mjs",
+    "test:palette": "esbuild tests/palette.test.ts --bundle --platform=node --format=esm --outfile=out/tests/palette.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/palette.mjs",
+    "test:inbox": "esbuild tests/notifications.test.ts --bundle --platform=node --format=esm --outfile=out/tests/notifications.mjs --alias:@shared/policy=./src/shared/policy --alias:@shared/types=./src/shared/types --log-level=warning && node out/tests/notifications.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-webgl": "^0.19.0",

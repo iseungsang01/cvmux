@@ -127,5 +127,16 @@ export const POLICY = {
   PERSIST_INTERVAL_MS: 30_000,
 
   /** 세션당 저장할 스크롤백 상한. P16-5 */
-  PERSIST_SCROLLBACK_BYTES: 128 * 1024
+  PERSIST_SCROLLBACK_BYTES: 128 * 1024,
+
+  /**
+   * 알림함이 들고 있는 최대 개수. 오래된 것부터 밀려난다. P21-2
+   *
+   * 읽지 않은 것은 밀어내지 않는다 — 목록이 가득 찼다고 아직 보지 않은 알림이
+   * 사라지면 그건 알림함이 아니다.
+   */
+  MAX_NOTIFICATIONS: 200,
+
+  /** 명령 팔레트가 한 번에 보여줄 최대 항목 수. P21-6 */
+  PALETTE_MAX_RESULTS: 40
 } as const

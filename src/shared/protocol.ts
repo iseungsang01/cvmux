@@ -168,6 +168,8 @@ export const M = {
 
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',
+  /** 알림함·팔레트·찾기를 소켓에서 연다. cmux의 `right-sidebar show`에 해당. P21-11 */
+  APP_PANEL: 'app.panel',
 
   EVENTS_STREAM: 'events.stream'
 } as const
@@ -192,13 +194,13 @@ export const RENDERER_METHODS: ReadonlySet<string> = new Set<string>([
   M.PANE_SPLIT,
   M.PANE_FOCUS,
   M.PANE_CLOSE,
-  M.NOTIFICATION_LIST,
-  M.NOTIFICATION_MARK_READ,
-  M.NOTIFICATION_DISMISS,
-  M.NOTIFICATION_CLEAR,
+  /*
+   * 알림함 자체는 main이 들고 있다(P21). 여는 것만 렌더러 몫이다 —
+   * 그 세션이 어느 워크스페이스에 있는지는 렌더러만 안다.
+   */
   M.NOTIFICATION_OPEN,
-  M.NOTIFICATION_JUMP_UNREAD,
-  M.APP_OPEN
+  M.APP_OPEN,
+  M.APP_PANEL
 ])
 
 /** 이벤트 이름. 이름 필터(`--name`)가 쓰는 값이기도 하다 */

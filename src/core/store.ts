@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 
 import { POLICY } from '@shared/policy'
-import type { PaneNode, Workspace } from '@shared/types'
+import type { Notification, PaneNode, Workspace } from '@shared/types'
 
 /**
  * 세션 목록을 디스크에 남긴다 (POLICY.md P16).
@@ -43,10 +43,18 @@ export interface PersistedWorkspace {
 }
 
 export interface PersistedState {
-  version: 2
+  version: 3
   savedAt: number
   sessions: PersistedSession[]
   workspaces: PersistedWorkspace[]
+  /**
+   * 알림함 (P21-8).
+   *
+   * 세션 순번이 아니라 세션 id를 그대로 들고 있다. 복원하면 그 id는 아무것도
+   * 가리키지 않지만, 알림은 **무슨 일이 있었는가**의 기록이라 가리킬 세션이
+   * 사라져도 읽을 값이 남는다 — 세션 제목을 함께 저장하는 이유다.
+   */
+  notifications: Notification[]
 }
 
 /** 스크롤백을 상한까지 줄인다. 이스케이프 시퀀스 중간에서 자르면 화면이 깨지므로 개행에서 자른다. P16-5 */
@@ -109,10 +117,16 @@ export class SessionStore {
       savedAt?: unknown
       sessions?: unknown
       workspaces?: unknown
+      notifications?: unknown
     }
-    // version 1은 pane 배치가 없던 시절의 파일이다. 세션만 살리고 배치는 비운다 —
-    // 호출자가 세션마다 pane 하나짜리 워크스페이스를 만들어 준다
-    if (state.version !== 1 && state.version !== 2) return null
+    /*
+     * 옛 버전의 파일도 읽는다.
+     *
+     * version 1에는 pane 배치가, 2에는 알림함이 없었다. 없는 것은 비워 두면
+     * 그만이고, 있는 것은 살린다 — 앱을 갱신했다고 열어 둔 세션이 사라지면
+     * 그건 복원이 아니다(P16).
+     */
+    if (state.version !== 1 && state.version !== 2 && state.version !== 3) return null
     if (!Array.isArray(state.sessions)) return null
 
     const sessions: PersistedSession[] = []
@@ -139,12 +153,32 @@ export class SessionStore {
     }
 
     return {
-      version: 2,
+      version: 3,
       savedAt: typeof state.savedAt === 'number' ? state.savedAt : 0,
       sessions: kept,
-      workspaces
+      workspaces,
+      notifications: parseNotifications(state.notifications)
     }
   }
+}
+
+function parseNotifications(value: unknown): Notification[] {
+  if (!Array.isArray(value)) return []
+  const out: Notification[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const n = entry as Partial<Notification>
+    if (typeof n.id !== 'string' || typeof n.sessionId !== 'string') continue
+    out.push({
+      id: n.id,
+      sessionId: n.sessionId,
+      sessionTitle: typeof n.sessionTitle === 'string' ? n.sessionTitle : '세션',
+      text: typeof n.text === 'string' ? n.text : '',
+      createdAt: typeof n.createdAt === 'number' ? n.createdAt : 0,
+      read: n.read === true
+    })
+  }
+  return out.slice(-POLICY.MAX_NOTIFICATIONS)
 }
 
 function parseWorkspace(value: unknown, count: number, dropped: number): PersistedWorkspace | null {

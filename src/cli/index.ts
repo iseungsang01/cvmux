@@ -32,6 +32,7 @@ const SWITCHES: ReadonlySet<string> = new Set([
   'json',
   'enter',
   'all',
+  'close',
   'reconnect',
   'no-ack'
 ])
@@ -271,6 +272,14 @@ async function run(
       return client.call(M.NOTIFICATION_OPEN, { session: args[0] ?? defaultSession(flags) })
     case 'jump-to-unread':
       return client.call(M.NOTIFICATION_JUMP_UNREAD)
+
+    case 'panel':
+      return client.call(M.APP_PANEL, {
+        panel: args[0] ?? 'notifications',
+        open: flags.get('close') !== true,
+        scope: str(flags, 'scope'),
+        query: str(flags, 'query') ?? args[1]
+      })
 
     // ── 기타 ────────────────────────────────────────────────────
     case 'open': {

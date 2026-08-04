@@ -26,8 +26,12 @@ export function render(command: string, result: unknown, json: boolean): string 
 
     case 'list-notifications': {
       const list = rows(value.notifications)
-      if (list.length === 0) return '읽지 않은 알림이 없습니다.'
-      return table(list, ['workspace_ref', 'title', 'text'])
+      if (list.length === 0) return '알림이 없습니다.'
+      // 읽음 여부가 먼저다 — 목록을 여는 이유가 대개 그것이다
+      return table(
+        list.map((n) => ({ ...n, unread: n.read === false })),
+        ['unread', 'session_title', 'text', 'id']
+      )
     }
 
     case 'read-screen':

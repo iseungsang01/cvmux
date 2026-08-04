@@ -1,5 +1,6 @@
 import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 
+import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
@@ -63,7 +64,8 @@ class RendererBridge implements ControlBridge {
 export function registerIpc(
   manager: PtyManager,
   notifier: Notifier,
-  layout: LayoutStore
+  layout: LayoutStore,
+  inbox: NotificationStore
 ): ControlBridge {
   const bridge = new RendererBridge()
 
@@ -87,10 +89,11 @@ export function registerIpc(
     broadcast(IPC.EVT_CLOSED, id)
   })
 
-  // 명시적 알림(OSC 9/777/99/BEL)을 받으면 데스크톱 토스트도 띄운다. P15-1
+  // 명시적 알림(OSC 9/777/99/BEL)을 받으면 알림함에 쌓고 토스트도 띄운다. P15-1 / P21-1
   manager.on('notify', (id, text) => {
     const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
     const title = manager.metaOf(id)?.title ?? ''
+    inbox.add(id, title || '세션', text)
     notifier.notify({
       sessionId: id,
       sessionTitle: title || '세션',
@@ -163,9 +166,36 @@ export function registerIpc(
       : false
   )
 
-  ipcMain.handle(IPC.MARK_READ, (_event, id: unknown) =>
-    typeof id === 'string' ? manager.markRead(id) : false
+  /*
+   * 세션을 보면 그 세션의 알림도 함께 읽음이 된다 (P21-5).
+   *
+   * 사이드바의 링과 알림함 배지가 따로 놀면 둘 중 하나는 거짓말이 된다.
+   */
+  ipcMain.handle(IPC.MARK_READ, (_event, id: unknown) => {
+    if (typeof id !== 'string') return false
+    inbox.markSessionRead(id)
+    return manager.markRead(id)
+  })
+
+  ipcMain.handle(IPC.NOTIFICATIONS, () => inbox.list())
+
+  ipcMain.handle(IPC.NOTIFICATION_READ, (_event, id: unknown) =>
+    typeof id === 'string' ? inbox.markRead(id) : false
   )
+
+  ipcMain.handle(IPC.NOTIFICATION_UNREAD, (_event, id: unknown) =>
+    typeof id === 'string' ? inbox.setUnread(id) : false
+  )
+
+  ipcMain.handle(IPC.NOTIFICATION_DISMISS, (_event, id: unknown) =>
+    typeof id === 'string' ? inbox.dismiss(id) : false
+  )
+
+  ipcMain.handle(IPC.NOTIFICATIONS_CLEAR, (_event, scope: unknown) => {
+    if (scope === 'all') inbox.clear()
+    else inbox.dismissRead()
+    return true
+  })
 
   /*
    * 클립보드 조회 (P7-4).

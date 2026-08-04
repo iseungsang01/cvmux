@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
@@ -69,6 +70,8 @@ interface Entry {
   id: string
   term: Terminal
   fit: FitAddon
+  /** 화면 안에서 찾기. P21-9 */
+  search: SearchAddon
   webgl: WebglAddon | null
   container: HTMLElement | null
   opened: boolean
@@ -194,6 +197,80 @@ export class TerminalHost {
     else this.releaseWebgl(entry)
   }
 
+  /**
+   * 화면 안에서 찾기 (P21-9).
+   *
+   * 찾은 자리를 스크롤바에도 표시한다 — 10,000줄짜리 스크롤백에서 "몇 개
+   * 있는지"만 알고 "어디쯤인지"를 모르면 찾기가 반쪽이다.
+   *
+   * @returns 맞은 것이 있는가
+   */
+  find(id: string, query: string, direction: 'next' | 'previous' = 'next'): boolean {
+    const entry = this.entries.get(id)
+    if (!entry) return false
+    if (query === '') {
+      entry.search.clearDecorations()
+      return false
+    }
+
+    const options = {
+      decorations: {
+        matchBackground: '#3b4a6b',
+        matchBorder: '#7aa2f7',
+        matchOverviewRuler: '#7aa2f7',
+        activeMatchBackground: '#7aa2f7',
+        activeMatchBorder: '#d3d9e3',
+        activeMatchColorOverviewRuler: '#d3d9e3'
+      }
+    }
+    return direction === 'next'
+      ? entry.search.findNext(query, options)
+      : entry.search.findPrevious(query, options)
+  }
+
+  /** 몇 개 중 몇 번째인지 알려 준다. 찾기 바가 이걸 표시한다 */
+  onSearchResults(id: string, cb: (index: number, count: number) => void): () => void {
+    const entry = this.ensure(id)
+    const disposable = entry.search.onDidChangeResults((result) => {
+      cb(result.resultIndex, result.resultCount)
+    })
+    return () => disposable.dispose()
+  }
+
+  clearSearch(id: string): void {
+    this.entries.get(id)?.search.clearDecorations()
+  }
+
+  /**
+   * 스크롤백을 텍스트로 (P21-10).
+   *
+   * 모든 세션에서 찾을 때(`Ctrl+Shift+F`) 쓴다. 이 앱에서 "디렉토리에서 찾기"의
+   * 자연스러운 대응물은 파일 검색이 아니라 **세션들의 화면**이다 — 그게 여기
+   * 쌓여 있는 것이고, 어느 세션에서 그 오류를 봤는지가 실제 질문이다.
+   */
+  bufferText(id: string): string[] {
+    const entry = this.entries.get(id)
+    if (!entry) return []
+
+    const buffer = entry.term.buffer.active
+    const lines: string[] = []
+    for (let y = 0; y < buffer.length; y++) {
+      const line = buffer.getLine(y)
+      if (!line) continue
+      lines.push(line.translateToString(true))
+    }
+    return lines
+  }
+
+  /** 찾은 줄로 스크롤한다 — 세션을 옮겨 간 뒤 그 자리를 보여주려고 */
+  scrollToLine(id: string, line: number): void {
+    const entry = this.entries.get(id)
+    if (!entry) return
+    // 찾은 줄이 화면 위쪽 1/3 자리에 오게 한다. 맨 위에 붙이면 앞뒤 맥락이 없다
+    const offset = Math.max(0, line - Math.floor(entry.term.rows / 3))
+    entry.term.scrollToLine(offset)
+  }
+
   dispose(id: string): void {
     const entry = this.entries.get(id)
     if (!entry) return
@@ -233,6 +310,9 @@ export class TerminalHost {
     const fit = new FitAddon()
     term.loadAddon(fit)
 
+    const search = new SearchAddon()
+    term.loadAddon(search)
+
     // 한글·이모지 폭 계산을 유니코드 11 기준으로 (기본은 6 기준이라 폭이 틀어진다)
     try {
       const unicode11 = new Unicode11Addon()
@@ -246,6 +326,7 @@ export class TerminalHost {
       id,
       term,
       fit,
+      search,
       webgl: null,
       container: null,
       opened: false,

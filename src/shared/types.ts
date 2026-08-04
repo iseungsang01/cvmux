@@ -162,6 +162,12 @@ export const IPC = {
   SAVE_LAYOUT: 'layout:save',
   /** 제어 소켓 요청에 대한 렌더러의 답. P20-7 */
   CTL_REPLY: 'ctl:reply',
+  /** 알림함. P21 */
+  NOTIFICATIONS: 'notify:list',
+  NOTIFICATION_READ: 'notify:read',
+  NOTIFICATION_UNREAD: 'notify:unread',
+  NOTIFICATION_DISMISS: 'notify:dismiss',
+  NOTIFICATIONS_CLEAR: 'notify:clear',
 
   // main → renderer (send)
   EVT_DATA: 'evt:session-data',
@@ -172,7 +178,9 @@ export const IPC = {
   /** 토스트를 클릭했다 — 해당 세션으로 전환하라. P15-5 */
   EVT_ACTIVATE: 'evt:activate-session',
   /** 제어 소켓이 렌더러에게 묻는다 (워크스페이스·pane·알림). P20-7 */
-  EVT_CTL_REQUEST: 'evt:control-request'
+  EVT_CTL_REQUEST: 'evt:control-request',
+  /** 알림함이 바뀌었다. P21 */
+  EVT_NOTIFICATIONS: 'evt:notifications'
 } as const
 
 /** 렌더러가 답해야 하는 제어 요청. P20-7 */
@@ -180,6 +188,21 @@ export interface ControlAsk {
   id: number
   method: string
   params: Record<string, unknown>
+}
+
+/**
+ * 알림함의 한 줄 (P21).
+ *
+ * 세션이 닫혀도 남으므로 세션 제목을 함께 들고 있다 — 나중에 목록을 열었을 때
+ * "무엇이 나를 불렀는지"가 id만 남으면 아무 도움이 안 된다.
+ */
+export interface Notification {
+  id: string
+  sessionId: string
+  sessionTitle: string
+  text: string
+  createdAt: number
+  read: boolean
 }
 
 /** preload가 contextBridge로 노출하는 화이트리스트 API. P9-2 */
@@ -204,6 +227,14 @@ export interface CvmuxApi {
   /** 제어 소켓 요청에 답한다. 오류면 ok=false에 사유 문자열. P20-7 */
   controlReply(id: number, ok: boolean, payload: unknown): Promise<boolean>
 
+  /** 알림함. P21 */
+  notifications(): Promise<Notification[]>
+  notificationRead(id: string): Promise<boolean>
+  notificationUnread(id: string): Promise<boolean>
+  notificationDismiss(id: string): Promise<boolean>
+  /** 읽은 것만 치울지(`read`), 전부 비울지 */
+  notificationsClear(scope: 'read' | 'all'): Promise<boolean>
+
   onData(cb: (id: string, chunk: string) => void): () => void
   onMeta(cb: (meta: SessionMeta) => void): () => void
   onExit(cb: (info: SessionExitInfo) => void): () => void
@@ -211,4 +242,5 @@ export interface CvmuxApi {
   onCreated(cb: (meta: SessionMeta) => void): () => void
   onActivate(cb: (id: string) => void): () => void
   onControlRequest(cb: (ask: ControlAsk) => void): () => void
+  onNotifications(cb: (items: Notification[]) => void): () => void
 }

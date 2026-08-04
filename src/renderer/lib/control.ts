@@ -28,6 +28,13 @@ export interface ControlContext {
   focusPane(workspaceId: string, paneId: string): void
   closeSession(sessionId: string): void
   markRead(sessionId: string): void
+  /** 알림함·팔레트·찾기를 열고 닫는다. P21-11 */
+  setPanel(
+    panel: 'notifications' | 'palette' | 'find',
+    open: boolean,
+    scope: 'session' | 'all',
+    query?: string
+  ): void
 }
 
 /** 소켓 클라이언트에게 그대로 보이는 오류. 사유가 사람이 읽을 수 있어야 한다 */
@@ -123,34 +130,16 @@ export async function handleControl(
       return { workspace_id: workspace.id, pane_id: pane, closed: true }
     }
 
-    case M.NOTIFICATION_LIST:
-      return { notifications: unreadNotifications(ctx) }
-
-    case M.NOTIFICATION_MARK_READ: {
+    /*
+     * 알림이 온 세션으로 이동한다 (P21-4).
+     *
+     * 알림함은 main이 들고 있으므로 여기 오는 것은 이미 정해진 세션 하나다.
+     * 렌더러가 아는 것은 "그 세션이 어느 워크스페이스의 어느 pane인가" 뿐이다.
+     */
+    case M.NOTIFICATION_OPEN: {
       const target = optionalString(params.session)
-      if (target === undefined) {
-        for (const note of unreadNotifications(ctx)) ctx.markRead(String(note.session_id))
-        return { marked: true, scope: 'all' }
-      }
+      if (target === undefined) throw new ControlRequestError('세션을 지정해야 합니다')
       const session = resolveSession(target, ctx)
-      ctx.markRead(session.id)
-      return { marked: true, session_id: session.id }
-    }
-
-    // 지금 모델에서는 알림이 세션에 붙어 있다 — 하나를 지우는 것과 읽음 처리가 같다
-    case M.NOTIFICATION_DISMISS:
-    case M.NOTIFICATION_CLEAR: {
-      for (const note of unreadNotifications(ctx)) ctx.markRead(String(note.session_id))
-      return { cleared: true }
-    }
-
-    case M.NOTIFICATION_OPEN:
-    case M.NOTIFICATION_JUMP_UNREAD: {
-      const target =
-        method === M.NOTIFICATION_OPEN ? optionalString(params.session) : undefined
-      const session =
-        target !== undefined ? resolveSession(target, ctx) : latestUnreadSession(ctx)
-      if (!session) throw new ControlRequestError('읽지 않은 알림이 없습니다')
 
       const located = locateSession(session.id, ctx)
       if (!located) throw new ControlRequestError('그 세션이 있는 워크스페이스를 찾지 못했습니다')
@@ -163,6 +152,24 @@ export async function handleControl(
         workspace_id: located.workspace.id,
         pane_id: located.paneId
       }
+    }
+
+    /*
+     * 화면의 겹판을 소켓에서 연다 (P21-11).
+     *
+     * 스크립트가 사람을 대신해 앱을 조작할 수 있어야 한다는 것이 P20의 전제인데,
+     * 알림함과 팔레트만 단축키로만 열리면 그 전제에 구멍이 난다.
+     */
+    case M.APP_PANEL: {
+      const panel = optionalString(params.panel)
+      if (panel !== 'notifications' && panel !== 'palette' && panel !== 'find') {
+        throw new ControlRequestError('panel은 notifications/palette/find 중 하나여야 합니다')
+      }
+      const open = params.open !== false
+      const scope = optionalString(params.scope) === 'all' ? 'all' : 'session'
+      const query = optionalString(params.query)
+      ctx.setPanel(panel, open, scope, query)
+      return { panel, open, scope, query: query ?? null }
     }
 
     case M.APP_OPEN: {
@@ -288,33 +295,6 @@ function treePayload(node: PaneNode, ctx: ControlContext): unknown {
     sizes: node.sizes,
     children: node.children.map((child) => treePayload(child, ctx))
   }
-}
-
-function unreadNotifications(ctx: ControlContext): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = []
-  ctx.workspaces().forEach((workspace, index) => {
-    for (const leaf of collectLeaves(workspace.root)) {
-      const meta = ctx.sessions().get(leaf.sessionId)
-      if (!meta?.unread) continue
-      out.push({
-        session_id: meta.id,
-        workspace_id: workspace.id,
-        workspace_ref: `workspace:${index + 1}`,
-        pane_id: leaf.id,
-        title: meta.title,
-        text: meta.preview,
-        created_at: meta.createdAt
-      })
-    }
-  })
-  return out
-}
-
-function latestUnreadSession(ctx: ControlContext): SessionMeta | null {
-  const sessions = [...ctx.sessions().values()].filter((s) => s.unread)
-  if (sessions.length === 0) return null
-  // 가장 최근에 생긴 세션이 대개 방금 알림을 쏜 쪽이다
-  return sessions.reduce((best, s) => (s.createdAt > best.createdAt ? s : best))
 }
 
 function locateSession(

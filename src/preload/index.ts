@@ -7,6 +7,7 @@ import {
   type CreateSessionOptions,
   type CreateSessionResult,
   type CvmuxApi,
+  type Notification,
   type SessionExitInfo,
   type SessionMeta,
   type SessionSnapshot,
@@ -52,6 +53,12 @@ const api: CvmuxApi = {
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
+  notifications: () => ipcRenderer.invoke(IPC.NOTIFICATIONS) as Promise<Notification[]>,
+  notificationRead: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_READ, id) as Promise<boolean>,
+  notificationUnread: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_UNREAD, id) as Promise<boolean>,
+  notificationDismiss: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_DISMISS, id) as Promise<boolean>,
+  notificationsClear: (scope) =>
+    ipcRenderer.invoke(IPC.NOTIFICATIONS_CLEAR, scope) as Promise<boolean>,
 
   onData: (cb) => subscribe<[string, string]>(IPC.EVT_DATA, cb),
   onMeta: (cb) => subscribe<[SessionMeta]>(IPC.EVT_META, cb),
@@ -59,7 +66,8 @@ const api: CvmuxApi = {
   onClosed: (cb) => subscribe<[string]>(IPC.EVT_CLOSED, cb),
   onCreated: (cb) => subscribe<[SessionMeta]>(IPC.EVT_CREATED, cb),
   onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb),
-  onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb)
+  onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb),
+  onNotifications: (cb) => subscribe<[Notification[]]>(IPC.EVT_NOTIFICATIONS, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

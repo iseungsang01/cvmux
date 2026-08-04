@@ -15,6 +15,7 @@ import { connect, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { NotificationStore } from '../src/core/notifications'
 import type { PtyManager } from '../src/core/pty-manager'
 import type { SessionMeta } from '../src/shared/types'
 import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
@@ -66,7 +67,8 @@ class FakeManager extends EventEmitter {
     // 색상과 OSC가 섞인 화면 — read-screen이 이걸 걷어내야 한다
     return {
       meta: found,
-      replay: '\x1b]0;title\x07\x1b[32mhello\x1b[0m\nsecond\nthird\n'
+      // Clear-Host를 지나온 버퍼처럼 끝에 공백뿐인 줄이 붙어 있다
+      replay: '\x1b]0;title\x07\x1b[32mhello\x1b[0m\nsecond\nthird\n   \n \n'
     }
   }
 
@@ -159,6 +161,7 @@ async function main(): Promise<void> {
   const endpointFile = join(tmpdir(), `cvmux-test-endpoint-${process.pid}.json`)
 
   let focused = 0
+  const inbox = new NotificationStore(() => {})
   const server = new ControlSocketServer(
     {
       manager: manager as unknown as PtyManager,
@@ -166,8 +169,11 @@ async function main(): Promise<void> {
         call: (method) =>
           method === 'workspace.list'
             ? Promise.resolve({ workspaces: [] })
-            : Promise.reject(new Error('창이 없습니다'))
+            : method === 'notification.open'
+              ? Promise.resolve({ workspace_id: 'ws-1', pane_id: 'pane-1' })
+              : Promise.reject(new Error('창이 없습니다'))
       },
+      inbox,
       showWindow: () => {
         focused++
       },
@@ -323,6 +329,74 @@ async function main(): Promise<void> {
   {
     await client.send(17, { method: 'app.focus' })
     check('app.focus가 창을 부른다', focused === 1)
+  }
+
+  // ── P21: 알림함
+  {
+    const empty = await client.send(18, { method: 'notification.list' })
+    check('빈 알림함', (empty.result as { unread_count: number }).unread_count === 0)
+
+    const jumpNothing = await client.send(19, { method: 'notification.jump-to-unread' })
+    check(
+      '읽을 것이 없으면 not_found',
+      (jumpNothing.error as { code: string }).code === 'not_found'
+    )
+
+    inbox.add('sess-alpha', 'npm run dev', '빌드 실패')
+    inbox.add('sess-beta', 'claude', '확인이 필요합니다')
+
+    const list = await client.send(20, { method: 'notification.list' })
+    const payload = list.result as {
+      unread_count: number
+      notifications: Array<{ text: string; session_id: string; read: boolean }>
+    }
+    check('두 개가 쌓였다', payload.unread_count === 2)
+    check('최신이 앞이다', payload.notifications[0].text === '확인이 필요합니다')
+
+    /*
+     * 같은 세션이 연달아 부르면 마지막 것만 남는다 (P21-1).
+     *
+     * 다섯 줄이 쌓이는 것보다 마지막 한 줄이 지금 상태를 더 정확히 말한다.
+     */
+    inbox.add('sess-beta', 'claude', '아직도 기다립니다')
+    const merged = await client.send(21, { method: 'notification.list' })
+    check(
+      '연속 알림은 합쳐진다',
+      (merged.result as { unread_count: number }).unread_count === 2,
+      String((merged.result as { unread_count: number }).unread_count)
+    )
+    check(
+      '합쳐진 알림은 마지막 내용',
+      (merged.result as { notifications: Array<{ text: string }> }).notifications[0].text ===
+        '아직도 기다립니다'
+    )
+
+    // 가장 최근 미읽음으로 이동하면 그 알림은 읽음이 된다
+    const jump = await client.send(22, { method: 'notification.jump-to-unread' })
+    check('jump-to-unread가 대상을 찾는다', jump.ok === true)
+    check(
+      '창도 함께 깨운다',
+      focused === 2,
+      String(focused)
+    )
+    const after = await client.send(23, { method: 'notification.list' })
+    check(
+      '이동한 알림은 읽음이 된다',
+      (after.result as { unread_count: number }).unread_count === 1
+    )
+
+    // 읽은 것만 치운다 — 아직 보지 않은 것은 남는다
+    await client.send(24, { method: 'notification.clear' })
+    const remaining = await client.send(25, { method: 'notification.list' })
+    const left = (remaining.result as { notifications: Array<{ read: boolean }> }).notifications
+    check('읽은 것만 치운다', left.length === 1 && !left[0].read, String(left.length))
+
+    await client.send(26, { method: 'notification.clear', params: { all: true } })
+    const cleared = await client.send(27, { method: 'notification.list' })
+    check(
+      '--all은 전부 비운다',
+      (cleared.result as { notifications: unknown[] }).notifications.length === 0
+    )
   }
 
   // ── P20-9: 이벤트 스트림

@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 
+import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
 import {
   CONTROL_EVENT_BUFFER,
@@ -17,7 +18,7 @@ import {
   type ControlEventFrame,
   type ControlRequest
 } from '@shared/protocol'
-import type { SessionMeta } from '@shared/types'
+import type { Notification, SessionMeta } from '@shared/types'
 
 /**
  * 제어 소켓 서버 (P20).
@@ -34,6 +35,8 @@ export interface ControlBridge {
 export interface ControlHost {
   manager: PtyManager
   bridge: ControlBridge
+  /** 알림함. 목록과 읽음 처리는 main이 답한다. P21 */
+  inbox: NotificationStore
   /** 창을 앞으로 가져온다 — `cvmux open`과 `app.focus`가 쓴다 */
   showWindow(): void
   version: string
@@ -281,10 +284,13 @@ export class ControlSocketServer {
         const text = stripAnsi(snapshot.replay)
         if (!Number.isFinite(lines) || lines <= 0) return { session_id: session.id, text }
         /*
-         * 화면은 대개 줄바꿈으로 끝난다. 그 뒤의 빈 문자열을 한 줄로 세면
-         * `--lines 2`가 실제로는 한 줄만 준다 — 세어 달라고 한 것은 내용이다.
+         * 끝의 빈 줄은 세지 않는다.
+         *
+         * 화면은 대개 줄바꿈으로 끝나고, `Clear-Host`를 지나온 버퍼에는 공백만
+         * 남은 줄이 여럿 붙는다. 그것을 한 줄로 세면 `--lines 3`이 빈 줄 셋을
+         * 돌려준다 — 세어 달라고 한 것은 내용이다.
          */
-        const kept = text.replace(/\n+$/, '').split('\n')
+        const kept = text.replace(/(?:[ \t\r]*\n)+[ \t\r]*$/, '').split('\n')
         return { session_id: session.id, text: kept.slice(-lines).join('\n') }
       }
 
@@ -328,6 +334,60 @@ export class ControlSocketServer {
         const text = title ? `${title}: ${body}` : body
         this.host.manager.notify(session.id, text)
         return { session_id: session.id, text }
+      }
+
+      // ── 알림함 (P21) ─────────────────────────────────────────
+      case M.NOTIFICATION_LIST: {
+        const items = this.host.inbox.list()
+        const unreadOnly = params.unread === true
+        return {
+          unread_count: this.host.inbox.unreadCount(),
+          notifications: (unreadOnly ? items.filter((n) => !n.read) : items).map(notePayload)
+        }
+      }
+
+      case M.NOTIFICATION_MARK_READ: {
+        const ref = params.notification ?? params.session
+        if (ref === undefined) {
+          this.host.inbox.markAllRead()
+          for (const session of this.host.manager.list()) this.host.manager.markRead(session.id)
+          return { marked: true, scope: 'all' }
+        }
+        const note = this.host.inbox.find(String(ref))
+        if (note) return { marked: this.host.inbox.markRead(note.id), id: note.id }
+        // 알림 id가 아니면 세션을 가리킨 것으로 본다 — 그 세션의 알림을 모두 읽는다
+        const session = this.session(ref)
+        this.host.inbox.markSessionRead(session.id)
+        this.host.manager.markRead(session.id)
+        return { marked: true, session_id: session.id }
+      }
+
+      case M.NOTIFICATION_DISMISS: {
+        const ref = params.notification
+        if (ref === undefined) throw new ControlError('invalid_params', '알림 id가 필요합니다')
+        return { dismissed: this.host.inbox.dismiss(String(ref)) }
+      }
+
+      case M.NOTIFICATION_CLEAR:
+        if (params.all === true) this.host.inbox.clear()
+        else this.host.inbox.dismissRead()
+        return { cleared: true, remaining: this.host.inbox.list().length }
+
+      /*
+       * 가장 최근 읽지 않은 알림으로 (P21-4).
+       *
+       * 어느 알림인지는 main이 알고, 그 세션이 어느 워크스페이스에 있는지는
+       * 렌더러가 안다. 그래서 여기서 대상을 정한 뒤 렌더러에게 넘긴다.
+       */
+      case M.NOTIFICATION_JUMP_UNREAD: {
+        const latest = this.host.inbox.latestUnread()
+        if (!latest) throw new ControlError('not_found', '읽지 않은 알림이 없습니다')
+        const result = await this.host.bridge.call(M.NOTIFICATION_OPEN, {
+          session: latest.sessionId
+        })
+        this.host.inbox.markRead(latest.id)
+        this.host.showWindow()
+        return { ...(result as Record<string, unknown>), notification_id: latest.id }
       }
 
       case M.APP_FOCUS:
@@ -409,6 +469,17 @@ export class ControlSocketServer {
 }
 
 const STREAMING = Symbol('streaming')
+
+function notePayload(note: Notification): Record<string, unknown> {
+  return {
+    id: note.id,
+    session_id: note.sessionId,
+    session_title: note.sessionTitle,
+    text: note.text,
+    read: note.read,
+    created_at: note.createdAt
+  }
+}
 
 function sessionPayload(meta: SessionMeta): Record<string, unknown> {
   return {

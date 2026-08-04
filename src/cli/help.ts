@@ -59,7 +59,11 @@ pane:
   mark-notification-read [h]   읽음 처리 (--all)
   open-notification [h]  그 세션으로 이동하고 읽음 처리
   jump-to-unread         가장 최근 읽지 않은 알림으로 이동
-  clear-notifications    전부 읽음 처리
+  clear-notifications    읽은 알림 치우기 (--all이면 전부)
+
+화면:
+  panel <이름>           알림함·팔레트·찾기 열기 (notifications|palette|find)
+                         --close로 닫고, find는 --scope all로 전체 검색
 
 기타:
   open <path>            그 디렉토리에서 새 워크스페이스
@@ -104,6 +108,7 @@ const USAGE: Record<string, string> = {
   'clear-notifications': 'Usage: cvmux clear-notifications',
   'open-notification': 'Usage: cvmux open-notification [handle]',
   'jump-to-unread': 'Usage: cvmux jump-to-unread',
+  panel: 'Usage: cvmux panel <notifications|palette|find> [query] [--close] [--scope all] [--query <text>]',
   open: 'Usage: cvmux open <path>',
   version: 'Usage: cvmux version',
   help: 'Usage: cvmux help'

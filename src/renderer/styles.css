@@ -63,6 +63,7 @@ kbd {
 /* ── 타이틀바 ─────────────────────────────────────────────── */
 
 .titlebar {
+  position: relative; /* 알림 팝오버가 여기 매달린다. P21-3 */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -633,6 +634,7 @@ kbd {
 /* ── 터미널 영역 ──────────────────────────────────────────── */
 
 .main {
+  position: relative; /* 찾기 바가 여기 얹힌다. P21-9 */
   flex: 1;
   min-width: 0;
   background: var(--bg);
@@ -876,6 +878,420 @@ kbd {
 
 .primary-button:hover {
   border-color: var(--accent);
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.link-button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+/* ── 알림함 (P21) ─────────────────────────────────────────── */
+
+/*
+ * 종은 늘 자리를 지킨다. 미읽음이 있을 때만 숫자가 붙는다 — 늘 0이 떠 있으면
+ * 배지가 신호를 잃는다(P4-15에서 배운 것과 같다: 깜빡이거나 늘 켜진 표시는
+ * 신호가 아니라 배경이 된다).
+ */
+.titlebar-bell {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.titlebar-bell.is-unread {
+  color: var(--accent);
+}
+
+.titlebar-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #0d1016;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.notify-panel {
+  position: absolute;
+  top: calc(var(--titlebar-height) - 2px);
+  right: 152px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-height: 60vh;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  -webkit-app-region: no-drag;
+}
+
+.notify-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notify-head-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.notify-head-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #0d1016;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.notify-head-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.notify-empty {
+  padding: 24px 16px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.notify-empty p {
+  margin: 0;
+}
+
+.notify-empty-hint {
+  margin-top: 6px !important;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.notify-list {
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.notify-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.notify-item:hover {
+  background: var(--bg-row);
+}
+
+.notify-item-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  grid-template-areas:
+    'title time'
+    'text  text';
+  grid-template-columns: 1fr auto;
+}
+
+/* 아직 보지 않은 것은 왼쪽에 선을 긋는다 — 목록에서 눈이 먼저 가는 자리다 */
+.notify-item.is-unread .notify-item-main {
+  border-left-color: var(--accent);
+}
+
+.notify-item-title {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  grid-area: title;
+}
+
+.notify-item.is-unread .notify-item-title {
+  color: var(--accent);
+}
+
+.notify-item-time {
+  color: var(--text-faint);
+  font-size: 11px;
+  grid-area: time;
+}
+
+.notify-item-text {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  grid-area: text;
+}
+
+.notify-item.is-unread .notify-item-text {
+  font-weight: 600;
+}
+
+.notify-item-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+  padding-top: 6px;
+}
+
+.notify-item:hover .notify-item-actions {
+  opacity: 1;
+}
+
+/* ── 명령 팔레트 (P21-6) ──────────────────────────────────── */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgb(5 7 11 / 45%);
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  overflow: hidden;
+  border: 1px solid #2f3d54;
+  border-radius: 10px;
+  background: var(--bg-sidebar);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 60%);
+}
+
+.palette-input {
+  flex: none;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.palette-empty {
+  padding: 20px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.palette-list {
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.palette-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.palette-item.is-cursor {
+  background: var(--bg-row-active);
+}
+
+.palette-section {
+  flex: none;
+  width: 44px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-align: right;
+}
+
+.palette-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 왜 이것이 걸렸는지 보이게 — 맞은 글자만 밝힌다 */
+.palette-hit {
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.palette-hint {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ── 찾기 (P21-9 / P21-10) ────────────────────────────────── */
+
+.findbar-wrap {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 30;
+  width: min(420px, calc(100% - 36px));
+}
+
+.findbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid #2f3d54;
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.findbar-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.findbar-count {
+  flex: none;
+  min-width: 44px;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: right;
+}
+
+.findbar-scope {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.findbar-scope.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.findbar-hits {
+  margin: 4px 0 0;
+  padding: 4px;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+  list-style: none;
+}
+
+/*
+ * 긴 줄이 패널 밖으로 새지 않게 한다.
+ *
+ * flex 자식은 내용보다 좁아지지 않는 것이 기본이라, `overflow: hidden`만으로는
+ * 줄이 줄지 않고 패널을 밀어낸다. min-width를 0으로 풀어야 말줄임이 걸린다.
+ */
+.findbar-hits button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.findbar-hits button:hover {
+  background: var(--bg-row-active);
+}
+
+.findbar-hit-session {
+  flex: none;
+  width: 110px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 찾은 줄은 터미널에서 온 것이므로 터미널 글꼴로 보여준다 */
+.findbar-hit-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── 스크롤바 ─────────────────────────────────────────────── */

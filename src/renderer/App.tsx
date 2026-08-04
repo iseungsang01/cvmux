@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 
-import type { SessionMeta, Workspace } from '@shared/types'
+import type { Notification, SessionMeta, Workspace } from '@shared/types'
+import { CommandPalette } from './components/CommandPalette'
+import { FindBar, type FindHit } from './components/FindBar'
+import { NotificationPanel } from './components/NotificationPanel'
 import { PaneTree } from './components/PaneTree'
 import { Sidebar } from './components/Sidebar'
 import {
   closePane,
+  collectLeaves,
   findLeafBySession,
   firstLeafId,
   findLeaf,
@@ -12,6 +16,7 @@ import {
   splitPane
 } from './lib/layout'
 import { handleControl, type ControlContext } from './lib/control'
+import type { Command } from './lib/palette'
 import { focusedSessionId, makeWorkspace, reorder, sessionIdOfPane } from './lib/workspace'
 import { TerminalHost } from './terminal-host'
 
@@ -28,6 +33,10 @@ type Shortcut =
   | { kind: 'rename' }
   | { kind: 'split'; direction: 'row' | 'column' }
   | { kind: 'select'; index: number }
+  | { kind: 'palette' }
+  | { kind: 'notifications' }
+  | { kind: 'jump-unread' }
+  | { kind: 'find'; scope: 'session' | 'all' }
 
 function matchShortcut(event: KeyboardEvent): Shortcut | null {
   if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
@@ -46,9 +55,29 @@ function matchShortcut(event: KeyboardEvent): Shortcut | null {
        */
       case 'KeyE':
         return { kind: 'rename' }
+      /*
+       * 팔레트·알림·찾기 (P21).
+       *
+       * cmux는 ⌘P · ⌘I · ⌘⇧U · ⌘F를 쓰지만 여기서는 전부 Shift를 얹는다.
+       * Ctrl+P는 PSReadLine의 이전 기록, Ctrl+F는 한 글자 앞으로, Ctrl+I는
+       * 탭 완성이다 — 셸이 쓰는 키는 가로채지 않는다(P6-1).
+       */
+      case 'KeyP':
+        return { kind: 'palette' }
+      case 'KeyI':
+        return { kind: 'notifications' }
+      case 'KeyU':
+        return { kind: 'jump-unread' }
+      case 'KeyF':
+        return { kind: 'find', scope: 'all' }
       default:
         return null
     }
+  }
+
+  // Ctrl+F 단독은 PSReadLine의 것이라 쓸 수 없다. 찾기는 Alt+F로 연다
+  if (event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey) {
+    if (event.code === 'KeyF') return { kind: 'find', scope: 'session' }
   }
 
   // 분할은 Windows Terminal 관례를 따른다 — 이 앱을 쓸 사람이 이미 익힌 키다. P17-1
@@ -79,17 +108,41 @@ export function App(): JSX.Element {
   /** 이름을 고치고 있는 워크스페이스. 단축키가 바깥에서 편집을 열 수 있어야 한다. P19-3 */
   const [renamingId, setRenamingId] = useState<string | null>(null)
 
+  // ── 알림함 · 팔레트 · 찾기 (P21) ─────────────────────────────
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [inboxOpen, setInboxOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [find, setFind] = useState<{
+    open: boolean
+    query: string
+    scope: 'session' | 'all'
+    index: number
+    count: number
+  }>({ open: false, query: '', scope: 'session', index: 0, count: 0 })
+
   // 이벤트 핸들러가 오래된 클로저를 붙잡지 않도록 최신 값을 ref로 들고 다닌다
   const activeIdRef = useRef<string | null>(null)
   const workspacesRef = useRef<Workspace[]>([])
   const sessionsRef = useRef<SessionMeta[]>([])
   const composingRef = useRef(false)
 
+  /**
+   * 알림·찾기 동작 (P21).
+   *
+   * 단축키 처리기는 이 함수들보다 위에 있다 — 그쪽이 먼저 세션과 pane을
+   * 다루기 때문이다. 최신 값을 ref로 건네는 것은 이 파일이 이미 쓰는 방식이다.
+   */
+  const overlaysRef = useRef({
+    jumpToUnread: (): void => {},
+    openFind: (_scope: 'session' | 'all'): void => {}
+  })
+
   activeIdRef.current = activeId
   workspacesRef.current = workspaces
   sessionsRef.current = sessions
 
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications])
   const activeWorkspace = useMemo(
     () => workspaces.find((w) => w.id === activeId) ?? null,
     [workspaces, activeId]
@@ -383,6 +436,21 @@ export function App(): JSX.Element {
           if (target) setActiveId(target.id)
           break
         }
+        case 'palette':
+          // 겹쳐 뜨는 것을 막는다 — 팔레트를 열면 나머지는 물러난다
+          setInboxOpen(false)
+          setPaletteOpen((v) => !v)
+          break
+        case 'notifications':
+          setPaletteOpen(false)
+          setInboxOpen((v) => !v)
+          break
+        case 'jump-unread':
+          overlaysRef.current.jumpToUnread()
+          break
+        case 'find':
+          overlaysRef.current.openFind(shortcut.scope)
+          break
       }
     }
 
@@ -467,6 +535,267 @@ export function App(): JSX.Element {
     []
   )
 
+  // ── 알림함 (P21) ─────────────────────────────────────────────
+  useEffect(() => {
+    void window.cvmux.notifications().then(setNotifications)
+    return window.cvmux.onNotifications(setNotifications)
+  }, [])
+
+  /** 세션이 있는 워크스페이스로 이동한다. 알림함과 `jump-to-unread`가 함께 쓴다 */
+  const revealSession = useCallback((sessionId: string): boolean => {
+    const workspace = workspacesRef.current.find(
+      (w) => findLeafBySession(w.root, sessionId) !== null
+    )
+    if (!workspace) return false
+    const leaf = findLeafBySession(workspace.root, sessionId)
+    setActiveId(workspace.id)
+    if (leaf) focusPaneIn(workspace.id, leaf.id)
+    void window.cvmux.markRead(sessionId)
+    return true
+  }, [focusPaneIn])
+
+  const openNotification = useCallback(
+    (item: Notification): void => {
+      void window.cvmux.notificationRead(item.id)
+      // 세션이 이미 닫혔을 수 있다. 그래도 알림은 읽음이 된다 — 사용자는 봤다
+      revealSession(item.sessionId)
+      setInboxOpen(false)
+    },
+    [revealSession]
+  )
+
+  /** 가장 최근 읽지 않은 알림으로. P21-4 */
+  const jumpToUnread = useCallback((): void => {
+    const latest = notifications.find((n) => !n.read)
+    if (!latest) return
+    openNotification(latest)
+  }, [notifications, openNotification])
+
+  // ── 찾기 (P21-9 / P21-10) ────────────────────────────────────
+
+  /** 지금 화면에서 몇 번째인지 — 검색 애드온이 알려 준다 */
+  useEffect(() => {
+    if (!find.open || find.scope !== 'session' || focusedId === null) return
+    return host.onSearchResults(focusedId, (index, count) => {
+      setFind((prev) => (prev.index === index && prev.count === count ? prev : { ...prev, index, count }))
+    })
+  }, [find.open, find.scope, focusedId, host])
+
+  // 질의가 바뀌면 첫 번째 자리를 찾아 둔다. 타이핑하는 동안 결과가 따라온다
+  useEffect(() => {
+    if (!find.open || find.scope !== 'session' || focusedId === null) return
+    if (find.query === '') {
+      host.clearSearch(focusedId)
+      setFind((prev) => ({ ...prev, index: 0, count: 0 }))
+      return
+    }
+    host.find(focusedId, find.query)
+  }, [find.open, find.query, find.scope, focusedId, host])
+
+  /**
+   * 모든 세션에서 찾기 (P21-10).
+   *
+   * 이 앱에서 cmux의 "디렉토리에서 찾기"에 해당하는 것은 파일이 아니라
+   * **세션들의 화면**이다 — 여기 쌓여 있는 것이 그것이고, 실제 질문은 "그 오류를
+   * 어느 세션에서 봤더라"이기 때문이다.
+   */
+  const findHits = useMemo((): FindHit[] => {
+    if (!find.open || find.scope !== 'all' || find.query.trim() === '') return []
+
+    const needle = find.query.toLowerCase()
+    const hits: FindHit[] = []
+    for (const workspace of workspaces) {
+      for (const leaf of collectLeaves(workspace.root)) {
+        const meta = sessionMap.get(leaf.sessionId)
+        if (!meta) continue
+        const lines = host.bufferText(leaf.sessionId)
+        lines.forEach((text, line) => {
+          if (hits.length >= 200) return
+          if (!text.toLowerCase().includes(needle)) return
+          hits.push({
+            sessionId: leaf.sessionId,
+            sessionTitle: meta.title,
+            workspaceId: workspace.id,
+            line,
+            text
+          })
+        })
+      }
+    }
+    return hits
+  }, [find.open, find.query, find.scope, workspaces, sessionMap, host])
+
+  const pickHit = useCallback(
+    (hit: FindHit): void => {
+      setActiveId(hit.workspaceId)
+      const workspace = workspacesRef.current.find((w) => w.id === hit.workspaceId)
+      const leaf = workspace ? findLeafBySession(workspace.root, hit.sessionId) : null
+      if (workspace && leaf) focusPaneIn(workspace.id, leaf.id)
+      // 세션을 바꾼 뒤라 레이아웃이 아직 없다. 다음 프레임에 그 줄로 간다
+      requestAnimationFrame(() => host.scrollToLine(hit.sessionId, hit.line))
+    },
+    [focusPaneIn, host]
+  )
+
+  const closeFind = useCallback((): void => {
+    if (focusedId !== null) host.clearSearch(focusedId)
+    setFind((prev) => ({ ...prev, open: false, query: '', index: 0, count: 0 }))
+    if (focusedId !== null) host.focus(focusedId)
+  }, [focusedId, host])
+
+  const openFind = useCallback((scope: 'session' | 'all'): void => {
+    setFind((prev) => ({ ...prev, open: true, scope, index: 0, count: 0 }))
+  }, [])
+
+  overlaysRef.current = { jumpToUnread, openFind }
+
+  // ── 명령 팔레트 (P21-6) ──────────────────────────────────────
+
+  /**
+   * 팔레트에 담기는 것들.
+   *
+   * 단축키가 있는 것은 조합을 함께 적는다 — 팔레트는 명령을 실행하는 자리이자
+   * 단축키를 배우는 자리다. 열려 있는 워크스페이스도 항목으로 넣는다: 이름으로
+   * 세션을 찾는 것이 `Ctrl+Alt+숫자`보다 자연스러운 순간이 있다.
+   */
+  const commands = useMemo((): Command[] => {
+    const unread = notifications.filter((n) => !n.read).length
+    const list: Command[] = [
+      {
+        id: 'workspace.new',
+        title: '새 세션',
+        keywords: 'new workspace session create',
+        hint: 'Ctrl+Shift+N',
+        section: '세션',
+        run: () => void createWorkspace().catch(() => undefined)
+      },
+      {
+        id: 'pane.split.right',
+        title: '오른쪽으로 분할',
+        keywords: 'split right vertical pane',
+        hint: 'Alt+Shift+=',
+        section: 'pane',
+        run: () => void splitFocused('row')
+      },
+      {
+        id: 'pane.split.down',
+        title: '아래로 분할',
+        keywords: 'split down horizontal pane',
+        hint: 'Alt+Shift+-',
+        section: 'pane',
+        run: () => void splitFocused('column')
+      },
+      {
+        id: 'pane.close',
+        title: '이 pane 닫기',
+        keywords: 'close pane kill',
+        hint: 'Ctrl+Shift+W',
+        section: 'pane',
+        run: closeFocusedPane
+      },
+      {
+        id: 'session.restart',
+        title: '세션 재시작',
+        keywords: 'restart respawn reload session',
+        section: '세션',
+        enabled: focusedId !== null,
+        run: () => {
+          if (focusedId !== null) void window.cvmux.restart(focusedId)
+        }
+      },
+      {
+        id: 'workspace.rename',
+        title: '이름 바꾸기',
+        keywords: 'rename title',
+        hint: 'Ctrl+Shift+E',
+        section: '세션',
+        enabled: activeId !== null,
+        run: () => {
+          setSidebarCollapsed(false)
+          setRenamingId(activeIdRef.current)
+        }
+      },
+      {
+        id: 'find.session',
+        title: '이 화면에서 찾기',
+        keywords: 'find search buffer',
+        hint: 'Alt+F',
+        section: '찾기',
+        run: () => openFind('session')
+      },
+      {
+        id: 'find.all',
+        title: '모든 세션에서 찾기',
+        keywords: 'find search all sessions global',
+        hint: 'Ctrl+Shift+F',
+        section: '찾기',
+        run: () => openFind('all')
+      },
+      {
+        id: 'notifications.show',
+        title: unread > 0 ? `알림 보기 (${unread})` : '알림 보기',
+        keywords: 'notifications inbox bell alerts',
+        hint: 'Ctrl+Shift+I',
+        section: '알림',
+        run: () => setInboxOpen(true)
+      },
+      {
+        id: 'notifications.jump',
+        title: '읽지 않은 알림으로 이동',
+        keywords: 'jump unread notification next',
+        hint: 'Ctrl+Shift+U',
+        section: '알림',
+        enabled: unread > 0,
+        run: jumpToUnread
+      },
+      {
+        id: 'notifications.clear',
+        title: '읽은 알림 치우기',
+        keywords: 'clear notifications read dismiss',
+        section: '알림',
+        enabled: notifications.some((n) => n.read),
+        run: () => void window.cvmux.notificationsClear('read')
+      },
+      {
+        id: 'view.sidebar',
+        title: sidebarCollapsed ? '사이드바 펴기' : '사이드바 접기',
+        keywords: 'sidebar toggle view',
+        hint: 'Ctrl+Shift+B',
+        section: '보기',
+        run: () => setSidebarCollapsed((v) => !v)
+      }
+    ]
+
+    // 열려 있는 워크스페이스로 바로 가기
+    workspaces.forEach((workspace, index) => {
+      const meta = sessionMap.get(focusedSessionId(workspace) ?? '')
+      const title = workspace.title ?? meta?.title ?? `세션 ${index + 1}`
+      list.push({
+        id: `goto.${workspace.id}`,
+        title,
+        keywords: `goto switch workspace ${meta?.git?.repo ?? ''} ${meta?.cwd ?? ''}`,
+        hint: index < 8 ? `Ctrl+Alt+${index + 1}` : undefined,
+        section: '이동',
+        enabled: workspace.id !== activeId,
+        run: () => setActiveId(workspace.id)
+      })
+    })
+
+    return list
+  }, [
+    activeId,
+    closeFocusedPane,
+    createWorkspace,
+    focusedId,
+    jumpToUnread,
+    notifications,
+    openFind,
+    sessionMap,
+    sidebarCollapsed,
+    splitFocused,
+    workspaces
+  ])
+
   /*
    * 제어 소켓이 묻는 것에 답한다 (P20-7).
    *
@@ -489,6 +818,15 @@ export function App(): JSX.Element {
       },
       markRead: (id) => {
         void window.cvmux.markRead(id)
+      },
+      setPanel: (panel, open, scope, query) => {
+        if (panel === 'notifications') setInboxOpen(open)
+        else if (panel === 'palette') setPaletteOpen(open)
+        else if (!open) closeFind()
+        else {
+          openFind(scope)
+          if (query !== undefined) setFind((prev) => ({ ...prev, query }))
+        }
       }
     }
 
@@ -503,7 +841,7 @@ export function App(): JSX.Element {
           )
       )
     })
-  }, [closeWorkspace, createWorkspace, focusPaneIn, renameWorkspace, splitPaneIn])
+  }, [closeFind, closeWorkspace, createWorkspace, focusPaneIn, openFind, renameWorkspace, splitPaneIn])
 
   return (
     <div className={`app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
@@ -520,6 +858,41 @@ export function App(): JSX.Element {
         <span className="titlebar-title">
           {focusedId !== null ? (sessionMap.get(focusedId)?.title ?? 'cvmux') : 'cvmux'}
         </span>
+
+        {/*
+          알림 배지 (P21-3).
+
+          미읽음이 없으면 숫자를 달지 않는다 — 늘 0이 떠 있으면 배지가 신호를
+          잃는다. 종은 항상 자리를 지켜서, 눌러 볼 곳이 있다는 사실 자체는
+          사라지지 않는다.
+        */}
+        <button
+          type="button"
+          className={`icon-button titlebar-bell${unreadCount > 0 ? ' is-unread' : ''}`}
+          onClick={() => {
+            setPaletteOpen(false)
+            setInboxOpen((v) => !v)
+          }}
+          title="알림 (Ctrl+Shift+I)"
+          aria-label={unreadCount > 0 ? `알림 ${unreadCount}개` : '알림'}
+        >
+          🔔
+          {unreadCount > 0 ? <span className="titlebar-badge">{unreadCount}</span> : null}
+        </button>
+
+        <NotificationPanel
+          items={notifications}
+          open={inboxOpen}
+          onClose={() => setInboxOpen(false)}
+          onOpen={openNotification}
+          onToggleRead={(item) => {
+            void (item.read
+              ? window.cvmux.notificationUnread(item.id)
+              : window.cvmux.notificationRead(item.id))
+          }}
+          onDismiss={(item) => void window.cvmux.notificationDismiss(item.id)}
+          onClear={(scope) => void window.cvmux.notificationsClear(scope)}
+        />
       </div>
 
       <div className="body">
@@ -541,6 +914,25 @@ export function App(): JSX.Element {
         />
 
         <main className="main">
+          <FindBar
+            open={find.open}
+            query={find.query}
+            index={find.index}
+            count={find.count}
+            scope={find.scope}
+            hits={findHits}
+            onQueryChange={(query) => setFind((prev) => ({ ...prev, query }))}
+            onNext={() => {
+              if (focusedId !== null) host.find(focusedId, find.query, 'next')
+            }}
+            onPrevious={() => {
+              if (focusedId !== null) host.find(focusedId, find.query, 'previous')
+            }}
+            onScopeChange={(scope) => setFind((prev) => ({ ...prev, scope }))}
+            onPick={pickHit}
+            onClose={closeFind}
+          />
+
           {workspaces.length === 0 ? (
             <div className="empty">
               <h1>열린 세션이 없습니다</h1>
@@ -573,6 +965,12 @@ export function App(): JSX.Element {
           )}
         </main>
       </div>
+
+      <CommandPalette
+        commands={commands}
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   )
 }

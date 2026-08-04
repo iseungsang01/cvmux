@@ -3,6 +3,7 @@ import { homedir, release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 
+import { NotificationStore } from '@core/notifications'
 import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
 import { POLICY } from '@shared/policy'
@@ -47,15 +48,32 @@ let restoredLayout: Workspace[] = []
 /** 렌더러가 마지막으로 알려준 배치 — 저장 대상 */
 let currentLayout: Workspace[] = []
 
-/** 지금 즉시 저장. P16-1 / P17 */
+/**
+ * 알림함 (P21).
+ *
+ * 바뀔 때마다 열려 있는 창에 통째로 내려보낸다. 200줄짜리 목록이라 부분
+ * 갱신을 설계할 이유가 없고, 통째로 보내면 렌더러가 어긋난 상태를 들고 있을
+ * 여지도 없다.
+ */
+const inbox = new NotificationStore(() => {
+  const items = inbox.list()
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue
+    win.webContents.send(IPC.EVT_NOTIFICATIONS, items)
+  }
+  schedulePersist()
+})
+
+/** 지금 즉시 저장. P16-1 / P17 / P21-8 */
 function persistNow(): void {
   if (!store) return
   store.save({
-    version: 2,
+    version: 3,
     savedAt: Date.now(),
     sessions: manager.serialize(),
     // 세션을 순번으로 가리키므로 serialize()와 같은 순서를 넘겨야 한다
-    workspaces: workspacesToPersisted(currentLayout, manager.sessionOrder())
+    workspaces: workspacesToPersisted(currentLayout, manager.sessionOrder()),
+    notifications: inbox.serialize()
   })
 }
 
@@ -262,14 +280,21 @@ if (!app.requestSingleInstanceLock()) {
 
     store = new SessionStore(join(app.getPath('userData'), 'sessions.json'))
     const saved = store.load()
+    // 알림함은 세션보다 먼저 되살린다 — 복원한 세션의 알림이 이미 자리에 있어야 한다
+    if (saved) inbox.restore(saved.notifications)
 
-    const bridge = registerIpc(manager, notifier, {
-      load: () => restoredLayout,
-      save: (workspaces) => {
-        currentLayout = workspaces
-        schedulePersist()
-      }
-    })
+    const bridge = registerIpc(
+      manager,
+      notifier,
+      {
+        load: () => restoredLayout,
+        save: (workspaces) => {
+          currentLayout = workspaces
+          schedulePersist()
+        }
+      },
+      inbox
+    )
 
     /*
      * 제어 소켓을 세션보다 먼저 연다 (P20-3).
@@ -282,6 +307,7 @@ if (!app.requestSingleInstanceLock()) {
       {
         manager,
         bridge,
+        inbox,
         showWindow,
         version: app.getVersion()
       },
