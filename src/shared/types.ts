@@ -160,6 +160,8 @@ export const IPC = {
   /** pane 배치 저장/복원. P16 / P17 */
   LOAD_LAYOUT: 'layout:load',
   SAVE_LAYOUT: 'layout:save',
+  /** 제어 소켓 요청에 대한 렌더러의 답. P20-7 */
+  CTL_REPLY: 'ctl:reply',
 
   // main → renderer (send)
   EVT_DATA: 'evt:session-data',
@@ -168,8 +170,17 @@ export const IPC = {
   EVT_CLOSED: 'evt:session-closed',
   EVT_CREATED: 'evt:session-created',
   /** 토스트를 클릭했다 — 해당 세션으로 전환하라. P15-5 */
-  EVT_ACTIVATE: 'evt:activate-session'
+  EVT_ACTIVATE: 'evt:activate-session',
+  /** 제어 소켓이 렌더러에게 묻는다 (워크스페이스·pane·알림). P20-7 */
+  EVT_CTL_REQUEST: 'evt:control-request'
 } as const
+
+/** 렌더러가 답해야 하는 제어 요청. P20-7 */
+export interface ControlAsk {
+  id: number
+  method: string
+  params: Record<string, unknown>
+}
 
 /** preload가 contextBridge로 노출하는 화이트리스트 API. P9-2 */
 export interface CvmuxApi {
@@ -190,6 +201,8 @@ export interface CvmuxApi {
   /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
   loadLayout(): Promise<Workspace[]>
   saveLayout(workspaces: Workspace[]): Promise<boolean>
+  /** 제어 소켓 요청에 답한다. 오류면 ok=false에 사유 문자열. P20-7 */
+  controlReply(id: number, ok: boolean, payload: unknown): Promise<boolean>
 
   onData(cb: (id: string, chunk: string) => void): () => void
   onMeta(cb: (meta: SessionMeta) => void): () => void
@@ -197,4 +210,5 @@ export interface CvmuxApi {
   onClosed(cb: (id: string) => void): () => void
   onCreated(cb: (meta: SessionMeta) => void): () => void
   onActivate(cb: (id: string) => void): () => void
+  onControlRequest(cb: (ask: ControlAsk) => void): () => void
 }

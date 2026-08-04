@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   IPC,
   type ClipboardContent,
+  type ControlAsk,
   type CreateSessionOptions,
   type CreateSessionResult,
   type CvmuxApi,
@@ -49,13 +50,16 @@ const api: CvmuxApi = {
   setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
   loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<Workspace[]>,
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
+  controlReply: (id, ok, payload) =>
+    ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
 
   onData: (cb) => subscribe<[string, string]>(IPC.EVT_DATA, cb),
   onMeta: (cb) => subscribe<[SessionMeta]>(IPC.EVT_META, cb),
   onExit: (cb) => subscribe<[SessionExitInfo]>(IPC.EVT_EXIT, cb),
   onClosed: (cb) => subscribe<[string]>(IPC.EVT_CLOSED, cb),
   onCreated: (cb) => subscribe<[SessionMeta]>(IPC.EVT_CREATED, cb),
-  onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb)
+  onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb),
+  onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

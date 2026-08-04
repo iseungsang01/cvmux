@@ -1,12 +1,13 @@
 import { writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 
-import { PtyManager } from '@core/pty-manager'
+import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
 import { POLICY } from '@shared/policy'
 import { IPC, type Workspace } from '@shared/types'
+import { ControlSocketServer, pipePathFor } from './control-socket'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { createTray, type TrayController } from './tray'
@@ -37,6 +38,7 @@ const notifier = new Notifier((sessionId) => {
 let mainWindow: BrowserWindow | null = null
 let tray: TrayController | null = null
 let store: SessionStore | null = null
+let control: ControlSocketServer | null = null
 let persistTimer: NodeJS.Timeout | null = null
 let persistDebounce: NodeJS.Timeout | null = null
 
@@ -261,13 +263,41 @@ if (!app.requestSingleInstanceLock()) {
     store = new SessionStore(join(app.getPath('userData'), 'sessions.json'))
     const saved = store.load()
 
-    registerIpc(manager, notifier, {
+    const bridge = registerIpc(manager, notifier, {
       load: () => restoredLayout,
       save: (workspaces) => {
         currentLayout = workspaces
         schedulePersist()
       }
     })
+
+    /*
+     * 제어 소켓을 세션보다 먼저 연다 (P20-3).
+     *
+     * 주소가 세션 환경에 실려야 하므로 복원보다 앞서야 한다. 소켓을 열지 못해도
+     * 앱은 계속 뜬다 — CLI가 없다고 터미널까지 못 쓸 이유는 없다(P20-1).
+     */
+    const userData = app.getPath('userData')
+    control = new ControlSocketServer(
+      {
+        manager,
+        bridge,
+        showWindow,
+        version: app.getVersion()
+      },
+      pipePathFor(userData),
+      join(userData, 'control.json')
+    )
+    control.start()
+
+    /*
+     * 세션 안에서 `cvmux`가 보이게 한다 (P20-1).
+     *
+     * 설치본에서는 셸이 실행 파일 옆에, 개발 중에는 저장소의 bin/ 에 있다.
+     */
+    const cliDir = app.isPackaged ? dirname(app.getPath('exe')) : join(app.getAppPath(), 'bin')
+    manager.setSessionEnv({ ...control.env, [CLI_DIR_KEY]: cliDir })
+
     createWindow()
 
     /*
@@ -332,6 +362,10 @@ app.on('before-quit', (event) => {
 
   tray?.destroy()
   tray = null
+
+  // 파이프와 접속 정보를 남기지 않는다 — 꺼진 앱을 가리키는 주소는 거짓말이다. P20-2
+  control?.stop()
+  control = null
 
   if (persistTimer !== null) {
     clearInterval(persistTimer)

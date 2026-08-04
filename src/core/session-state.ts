@@ -159,6 +159,17 @@ export class SessionState {
     this.set('busy', 'inferred')
   }
 
+  /**
+   * 소켓으로 들어온 알림 (P20-5).
+   *
+   * `cvmux notify --session …`은 세션 바깥에서 온다 — PTY를 거치지 않으니
+   * OSC 파서가 볼 수 없다. 그래도 사용자에게는 셸이 쏜 알림과 구별될 이유가
+   * 없으므로 같은 자리로 들여보낸다.
+   */
+  notifyExternal(text: string): void {
+    this.notify(text)
+  }
+
   /** 사용자가 세션을 봤다. 미읽음 해제 후 상태 재평가. P4-5 */
   markRead(): void {
     if (!this.unread && this.notification === null) return

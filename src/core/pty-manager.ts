@@ -226,6 +226,13 @@ class Session {
     options: CreateSessionOptions,
     defaultCwd: string,
     restoredScrollback: string | null,
+    /**
+     * 모든 세션에 얹는 환경변수 (P20-3).
+     *
+     * 제어 소켓 주소가 여기 실린다. 객체를 그대로 들고 있다가 `start()` 때
+     * 읽으므로, 소켓이 세션보다 늦게 열려도 재시작한 세션은 주소를 받는다.
+     */
+    private readonly sessionEnv: Record<string, string>,
     private readonly emit: {
       data(id: string, chunk: string): void
       meta(id: string): void
@@ -290,7 +297,7 @@ class Session {
         rows: this.rows,
         cwd: this.cwd,
         useConpty: true,
-        env: buildEnv(this.id)
+        env: buildEnv(this.id, this.sessionEnv)
       })
 
       this.proc = proc
@@ -491,7 +498,7 @@ function clampRows(value: number | undefined): number {
   return Number.isFinite(n) && n >= POLICY.MIN_ROWS ? n : POLICY.MIN_ROWS // P2-1
 }
 
-function buildEnv(sessionId: string): Record<string, string> {
+function buildEnv(sessionId: string, extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value
@@ -513,11 +520,52 @@ function buildEnv(sessionId: string): Record<string, string> {
   } else {
     delete env.NO_COLOR
   }
+
+  /*
+   * 런처가 Electron 앱이면 세션이 그 부팅 방식을 물려받는다 (P3-9).
+   *
+   * NO_COLOR과 같은 부류다. 에이전트 CLI 안에서 cvmux를 띄우면
+   * `ELECTRON_RUN_AS_NODE=1`이 그대로 흘러들고, 그러면 세션 안에서 실행한
+   * Electron 앱이 창 대신 Node 스크립트로 뜬다 — 실제로 이 프로젝트를
+   * 개발하다 겪었다. cvmux 세션은 앱을 앱으로 띄우는 보통 터미널이다.
+   */
+  delete env.ELECTRON_RUN_AS_NODE
   // 에이전트 훅이 자신이 cvmux 안에서 도는지 알 수 있게 한다
   env.CVMUX = '1'
   env.CVMUX_SESSION_ID = sessionId
+
+  /*
+   * 제어 소켓 주소 (P20-3).
+   *
+   * 세션 안에서 `cvmux`를 부르면 인자 없이도 앱을 찾고 자기 세션을 가리킨다.
+   * 마지막에 얹으므로 사용자 환경의 같은 이름을 덮는다 — 지금 도는 앱이
+   * 언제나 옳다.
+   */
+  for (const [key, value] of Object.entries(extra)) {
+    if (key === CLI_DIR_KEY) continue
+    env[key] = value
+  }
+
+  /*
+   * CLI를 세션 PATH에 얹는다 (P20-1).
+   *
+   * 시스템 PATH는 건드리지 않는다 — 설치 프로그램이 사용자 환경을 고쳐 놓고
+   * 지우지 않는 일을 만들고 싶지 않다. cvmux 세션 안에서만 `cvmux`가 보이면
+   * 되고, 실제로 이 CLI를 부르는 것은 세션 안에서 도는 에이전트다.
+   */
+  const cliDir = extra[CLI_DIR_KEY]
+  if (cliDir) {
+    const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'Path'
+    const current = env[pathKey] ?? ''
+    if (!current.toLowerCase().split(';').includes(cliDir.toLowerCase())) {
+      env[pathKey] = current ? `${cliDir};${current}` : cliDir
+    }
+  }
   return env
 }
+
+/** `setSessionEnv`로 들어오지만 환경변수가 아니라 PATH 조작 지시다. P20-1 */
+export const CLI_DIR_KEY = 'CVMUX_CLI_DIR'
 
 export interface PtyManagerEvents {
   data: [id: string, chunk: string]
@@ -531,10 +579,22 @@ export interface PtyManagerEvents {
 export class PtyManager extends EventEmitter<PtyManagerEvents> {
   private readonly sessions = new Map<string, Session>()
   private readonly defaultCwd: string
+  /** 모든 세션이 공유하는 추가 환경변수. 소켓이 열리면 여기에 주소가 들어온다. P20-3 */
+  private readonly sessionEnv: Record<string, string> = {}
 
   constructor(options: PtyManagerOptions = {}) {
     super()
     this.defaultCwd = options.defaultCwd ?? homedir()
+  }
+
+  /**
+   * 세션 환경에 값을 더한다 (P20-3).
+   *
+   * 덮어쓰지 않고 채워 넣는다 — 객체 하나를 모든 세션이 나눠 보고 있으므로
+   * 통째로 갈아치우면 이미 만들어진 세션이 낡은 것을 붙잡는다.
+   */
+  setSessionEnv(env: Record<string, string>): void {
+    Object.assign(this.sessionEnv, env)
   }
 
   /** git·포트 정보를 주기적으로 채운다. P13 / P14 */
@@ -585,7 +645,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       }
     }
 
-    const session = new Session(options, this.defaultCwd, restoredScrollback, {
+    const session = new Session(options, this.defaultCwd, restoredScrollback, this.sessionEnv, {
       data: (id, chunk) => this.emit('data', id, chunk),
       meta: (id) => {
         const s = this.sessions.get(id)
@@ -693,6 +753,14 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const session = this.sessions.get(id)
     if (!session) return false
     session.state.markRead()
+    return true
+  }
+
+  /** 소켓으로 들어온 알림을 세션에 꽂는다. P20-5 */
+  notify(id: string, text: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.state.notifyExternal(text)
     return true
   }
 

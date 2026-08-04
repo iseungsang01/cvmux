@@ -2,7 +2,9 @@ import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
+import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
 import { IPC, type CreateSessionOptions, type Workspace } from '@shared/types'
+import type { ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
 
 /** pane 배치를 어디서 읽고 어디에 저장할지는 호출자(main/index.ts)가 결정한다. P17 */
@@ -12,12 +14,59 @@ export interface LayoutStore {
 }
 
 /**
+ * main ↔ 렌더러 왕복 다리 (P20-7).
+ *
+ * 워크스페이스와 pane 배치는 렌더러가 들고 있다. 제어 소켓이 그것을 물으면
+ * 여기를 거쳐 렌더러에 묻고 답을 받아 온다. 창이 없거나 렌더러가 제한 시간
+ * 안에 답하지 않으면 거부한다 — 소켓 클라이언트를 무한정 기다리게 두지 않는다.
+ */
+class RendererBridge implements ControlBridge {
+  private nextId = 1
+  private readonly waiting = new Map<
+    number,
+    { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
+  >()
+
+  call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    if (!win || win.webContents.isDestroyed()) {
+      return Promise.reject(new Error('창이 없습니다. cvmux 창을 먼저 여세요'))
+    }
+
+    const id = this.nextId++
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiting.delete(id)
+        reject(new Error('렌더러가 응답하지 않습니다'))
+      }, CONTROL_BRIDGE_TIMEOUT_MS)
+      this.waiting.set(id, { resolve, reject, timer })
+      win.webContents.send(IPC.EVT_CTL_REQUEST, { id, method, params })
+    })
+  }
+
+  settle(id: number, ok: boolean, payload: unknown): void {
+    const pending = this.waiting.get(id)
+    if (!pending) return
+    this.waiting.delete(id)
+    clearTimeout(pending.timer)
+    if (ok) pending.resolve(payload)
+    else pending.reject(new Error(typeof payload === 'string' ? payload : '요청을 처리하지 못했습니다'))
+  }
+}
+
+/**
  * IPC 배선 (P9).
  *
  * 렌더러의 요청은 여기서 PtyManager 호출로 바뀌고, PtyManager의 이벤트는
  * 여기서 렌더러로 내려간다.
  */
-export function registerIpc(manager: PtyManager, notifier: Notifier, layout: LayoutStore): void {
+export function registerIpc(
+  manager: PtyManager,
+  notifier: Notifier,
+  layout: LayoutStore
+): ControlBridge {
+  const bridge = new RendererBridge()
+
   /** 사용자가 지금 보고 있는 세션. 토스트를 띄울지 판단에 쓴다. P15-2 */
   let activeSessionId: string | null = null
 
@@ -54,6 +103,13 @@ export function registerIpc(manager: PtyManager, notifier: Notifier, layout: Lay
 
   ipcMain.handle(IPC.SET_ACTIVE, (_event, id: unknown) => {
     activeSessionId = typeof id === 'string' ? id : null
+    return true
+  })
+
+  // 렌더러가 제어 요청에 답했다. P20-7
+  ipcMain.handle(IPC.CTL_REPLY, (_event, id: unknown, ok: unknown, payload: unknown) => {
+    if (typeof id !== 'number') return false
+    bridge.settle(id, ok === true, payload)
     return true
   })
 
@@ -149,4 +205,6 @@ export function registerIpc(manager: PtyManager, notifier: Notifier, layout: Lay
       : await dialog.showMessageBox(options)
     return result.response === 0
   })
+
+  return bridge
 }

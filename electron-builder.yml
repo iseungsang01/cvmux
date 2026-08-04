@@ -28,6 +28,17 @@ files:
 asarUnpack:
   - '**/node_modules/node-pty/**'
 
+# CLI는 asar 밖에 있어야 한다. ELECTRON_RUN_AS_NODE로 돌 때는 Electron이 asar를
+# 읽지 못하므로, 안에 넣으면 `cvmux ping` 한 줄도 못 돈다. P20-1
+extraResources:
+  - from: out/cli
+    to: cli
+
+# 셸은 cvmux.exe 바로 옆에 놓인다 — 세션 PATH에 이 폴더가 들어간다. P20-1
+extraFiles:
+  - from: bin/cvmux.cmd
+    to: cvmux.cmd
+
 win:
   target:
     - target: nsis

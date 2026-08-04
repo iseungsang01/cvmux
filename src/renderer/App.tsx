@@ -11,7 +11,8 @@ import {
   resizeSplit,
   splitPane
 } from './lib/layout'
-import { focusedSessionId, makeWorkspace, reorder } from './lib/workspace'
+import { handleControl, type ControlContext } from './lib/control'
+import { focusedSessionId, makeWorkspace, reorder, sessionIdOfPane } from './lib/workspace'
 import { TerminalHost } from './terminal-host'
 
 /**
@@ -120,40 +121,59 @@ export function App(): JSX.Element {
     return sessionsRef.current.find((s) => s.id === sessionId)
   }, [])
 
-  const createWorkspace = useCallback(async (): Promise<void> => {
-    // 새 워크스페이스는 지금 보고 있던 작업 디렉토리를 물려받는다. P11-1
-    const result = await window.cvmux.create({ cwd: currentSession()?.cwd })
-    if (!result.ok || !result.session) {
-      // 상한 초과 같은 실패는 사유를 그대로 보여준다. P1-8 / P12-1
-      setError(result.error ?? '세션을 만들지 못했습니다.')
-      return
-    }
-    setError(null)
-    const workspace = makeWorkspace(result.session.id)
-    setWorkspaces((prev) => [...prev, workspace])
-    setActiveId(workspace.id)
-  }, [currentSession])
+  /**
+   * 새 워크스페이스 (P11-1).
+   *
+   * 만든 워크스페이스의 id를 돌려준다 — 제어 소켓이 방금 만든 것을 가리켜야
+   * 하기 때문이다(P20-7). 실패는 예외로 올린다: 사이드바에는 사유를 띄우고,
+   * 소켓 클라이언트에게도 같은 사유가 간다.
+   */
+  const createWorkspace = useCallback(
+    async (options: { cwd?: string; title?: string } = {}): Promise<string> => {
+      // 새 워크스페이스는 지금 보고 있던 작업 디렉토리를 물려받는다. P11-1
+      const result = await window.cvmux.create({ cwd: options.cwd ?? currentSession()?.cwd })
+      if (!result.ok || !result.session) {
+        // 상한 초과 같은 실패는 사유를 그대로 보여준다. P1-8 / P12-1
+        const message = result.error ?? '세션을 만들지 못했습니다.'
+        setError(message)
+        throw new Error(message)
+      }
+      setError(null)
+      const workspace = makeWorkspace(result.session.id, options.title ?? null)
+      setWorkspaces((prev) => [...prev, workspace])
+      setActiveId(workspace.id)
+      return workspace.id
+    },
+    [currentSession]
+  )
 
-  /** 포커스된 pane을 둘로 나눈다. P17-1 / P17-2 */
-  const splitFocused = useCallback(
-    async (direction: 'row' | 'column'): Promise<void> => {
-      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
-      if (!workspace) return
+  /** pane 하나를 둘로 나눈다. P17-1 / P17-2 */
+  const splitPaneIn = useCallback(
+    async (
+      workspaceId: string,
+      paneId: string,
+      direction: 'row' | 'column'
+    ): Promise<{ paneId: string; sessionId: string }> => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) throw new Error('워크스페이스를 찾을 수 없습니다.')
 
       // 새 pane은 나눈 pane의 작업 디렉토리에서 시작한다. P17-2
-      const result = await window.cvmux.create({ cwd: currentSession()?.cwd })
+      const source = sessionIdOfPane(workspace.root, paneId)
+      const cwd = source !== null ? sessionsRef.current.find((s) => s.id === source)?.cwd : undefined
+      const result = await window.cvmux.create({ cwd })
       if (!result.ok || !result.session) {
-        setError(result.error ?? '세션을 만들지 못했습니다.')
-        return
+        const message = result.error ?? '세션을 만들지 못했습니다.'
+        setError(message)
+        throw new Error(message)
       }
       setError(null)
 
       const sessionId = result.session.id
-      const split = splitPane(workspace.root, workspace.focusedPaneId, direction, sessionId)
+      const split = splitPane(workspace.root, paneId, direction, sessionId)
       if (!split) {
         // 나눌 자리를 잃었다 — 방금 만든 세션을 되돌린다
         void window.cvmux.close(sessionId)
-        return
+        throw new Error('나눌 pane이 사라졌습니다.')
       }
 
       setWorkspaces((prev) =>
@@ -161,8 +181,19 @@ export function App(): JSX.Element {
           w.id === workspace.id ? { ...w, root: split.root, focusedPaneId: split.newPaneId } : w
         )
       )
+      return { paneId: split.newPaneId, sessionId }
     },
-    [currentSession]
+    []
+  )
+
+  const splitFocused = useCallback(
+    async (direction: 'row' | 'column'): Promise<void> => {
+      const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
+      if (!workspace) return
+      // 단축키로 나눌 때의 실패는 이미 사이드바에 적혔다 — 여기서 더 할 일이 없다
+      await splitPaneIn(workspace.id, workspace.focusedPaneId, direction).catch(() => undefined)
+    },
+    [splitPaneIn]
   )
 
   /** 포커스된 pane을 닫는다. 세션을 끝내면 onClosed가 트리를 정리한다. P17-3 */
@@ -200,7 +231,8 @@ export function App(): JSX.Element {
         setWorkspaces(all)
         setActiveId(all[0].id)
       } else {
-        await createWorkspace()
+        // 첫 세션을 못 만들면 사유가 이미 화면에 있다. 빈 상태로 두고 기다린다. P1-7
+        await createWorkspace().catch(() => undefined)
       }
     })()
     return () => {
@@ -330,7 +362,7 @@ export function App(): JSX.Element {
 
       switch (shortcut.kind) {
         case 'new':
-          void createWorkspace()
+          void createWorkspace().catch(() => undefined)
           break
         case 'close':
           closeFocusedPane()
@@ -386,11 +418,19 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('focus', onFocus)
   }, [host])
 
-  const handleFocusPane = useCallback((paneId: string): void => {
+  const focusPaneIn = useCallback((workspaceId: string, paneId: string): void => {
     setWorkspaces((prev) =>
-      prev.map((w) => (w.id === activeIdRef.current ? { ...w, focusedPaneId: paneId } : w))
+      prev.map((w) => (w.id === workspaceId ? { ...w, focusedPaneId: paneId } : w))
     )
   }, [])
+
+  const handleFocusPane = useCallback(
+    (paneId: string): void => {
+      if (activeIdRef.current === null) return
+      focusPaneIn(activeIdRef.current, paneId)
+    },
+    [focusPaneIn]
+  )
 
   /**
    * 사용자가 지은 이름 (P19-3).
@@ -427,6 +467,44 @@ export function App(): JSX.Element {
     []
   )
 
+  /*
+   * 제어 소켓이 묻는 것에 답한다 (P20-7).
+   *
+   * 워크스페이스와 pane은 여기 산다. main은 세션만 알기 때문에, CLI의
+   * `workspace`·`pane`·`notification` 명령은 전부 이 길로 들어온다.
+   */
+  useEffect(() => {
+    const ctx: ControlContext = {
+      workspaces: () => workspacesRef.current,
+      sessions: () => new Map(sessionsRef.current.map((s) => [s.id, s])),
+      activeId: () => activeIdRef.current,
+      select: setActiveId,
+      create: (options) => createWorkspace(options),
+      closeWorkspace,
+      rename: renameWorkspace,
+      split: splitPaneIn,
+      focusPane: focusPaneIn,
+      closeSession: (id) => {
+        void window.cvmux.close(id)
+      },
+      markRead: (id) => {
+        void window.cvmux.markRead(id)
+      }
+    }
+
+    return window.cvmux.onControlRequest((ask) => {
+      void handleControl(ask.method, ask.params, ctx).then(
+        (result) => window.cvmux.controlReply(ask.id, true, result),
+        (error: unknown) =>
+          window.cvmux.controlReply(
+            ask.id,
+            false,
+            error instanceof Error ? error.message : String(error)
+          )
+      )
+    })
+  }, [closeWorkspace, createWorkspace, focusPaneIn, renameWorkspace, splitPaneIn])
+
   return (
     <div className={`app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
       <div className="titlebar">
@@ -453,7 +531,7 @@ export function App(): JSX.Element {
           collapsed={sidebarCollapsed}
           onSelect={setActiveId}
           onClose={closeWorkspace}
-          onCreate={() => void createWorkspace()}
+          onCreate={() => void createWorkspace().catch(() => undefined)}
           onDismissError={() => setError(null)}
           onRename={renameWorkspace}
           renamingId={renamingId}
@@ -469,7 +547,7 @@ export function App(): JSX.Element {
               <p>
                 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> 으로 새 세션을 시작하세요
               </p>
-              <button type="button" className="primary-button" onClick={() => void createWorkspace()}>
+              <button type="button" className="primary-button" onClick={() => void createWorkspace().catch(() => undefined)}>
                 새 세션
               </button>
             </div>

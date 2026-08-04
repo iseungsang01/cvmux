@@ -31,6 +31,8 @@ macOS를 쓴다면 cvmux 대신 cmux를 받는 편이 낫다 — 훨씬 완성�
 - **트레이 상주** — 창을 닫아도 앱은 트레이에 남고 세션은 계속 돈다.
   완전히 끄는 것은 트레이 메뉴의 '종료'뿐이다
 - **에이전트 알림** — Claude Code 같은 CLI가 확인을 기다리면 파란 링과 토스트로 알려준다
+- **CLI와 소켓 API** — 세션 안에서 `cvmux`를 부르면 워크스페이스를 만들고,
+  분할하고, 키를 보내고, 화면을 읽을 수 있다
 - 분할 창 · 세션 영속성 · 한글 UTF-8 · 트루컬러
 
 ## 설치와 실행
@@ -45,9 +47,9 @@ npm run dev      # 개발 모드로 바로 실행 (HMR)
 그 밖의 스크립트:
 
 ```powershell
-npm run build    # 프로덕션 빌드
+npm run build    # 프로덕션 빌드 (앱 + CLI)
 npm start        # 빌드 결과 실행
-npm test         # 회귀 테스트 (상태 감지 + pane 레이아웃)
+npm test         # 회귀 테스트 (상태 감지 · 레이아웃 · 프로토콜 · 제어 소켓)
 npm run typecheck
 npm run package  # Windows 설치 프로그램 생성 → release/
 ```
@@ -171,6 +173,49 @@ Claude Code라면 `~/.claude/settings.json` 에 훅을 건다. `Notification`은
 세션 안에서는 `$env:CVMUX`가 `1`이고 `$env:CVMUX_SESSION_ID`에 세션 ID가 들어 있으므로
 cvmux 안에서 도는지 구분할 수 있다.
 
+## CLI
+
+세션 안에서는 `cvmux`가 바로 잡힌다 — 세션 PATH에 얹혀 있다. 시스템 PATH는
+건드리지 않으므로 바깥에서 쓰려면 설치 폴더를 직접 PATH에 넣어야 한다.
+
+```powershell
+cvmux notify "테스트 12개 통과"        # 지금 세션에 알림
+cvmux new-workspace C:\repo            # 그 디렉토리에서 새 워크스페이스
+cvmux new-split down                   # 아래로 분할
+cvmux send --session 2 "npm test" --enter
+cvmux read-screen --lines 40           # 화면을 텍스트로
+cvmux list-workspaces --json
+```
+
+`--help`와 `--version`은 **앱이 꺼져 있어도** 답한다. 대상은 `workspace:2` 같은
+참조나 순번, id로 가리키며 인자를 생략하면 지금 보고 있는 것이 대상이다.
+줄여 쓴 id가 여러 개에 걸리면 거부한다 — 하나를 골라 주면 스크립트가 조용히
+엉뚱한 워크스페이스를 닫는다.
+
+이벤트는 줄 단위 JSON으로 흘려보낼 수 있다.
+
+```powershell
+cvmux events --name session.notify     # 알림만 지켜보기
+cvmux events --after 120               # 놓친 구간부터 따라잡기
+```
+
+`--after` 없이 붙으면 **지금부터**다. 그냥 켠 사람에게 지난 4096개를 쏟지 않는다.
+
+알림은 OSC 시퀀스 대신 이 길을 써도 된다. 훅에서 stdout이 캡처돼도 소켓은
+막히지 않으므로 이쪽이 더 확실하다.
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "cvmux notify --title \"Claude Code\" \"확인이 필요합니다\"" }] }
+    ]
+  }
+}
+```
+
+전체 명령은 `cvmux --help`에 있다. 프로토콜과 규칙은 [POLICY.md](./POLICY.md)의 P20.
+
 ## 단축키
 
 | 키 | 동작 |
@@ -230,8 +275,7 @@ Select-String -Path src\*\*.ts,src\*\*\*.tsx -Pattern 'P\d+-\d+'
 - WebGL 렌더링 + 컨텍스트 손실 시 자동 폴백, DPI 변경 대응
 - 대용량 붙여넣기 확인, bracketed paste
 
-**아직 안 되는 것** — PR 상태 표시(네트워크 호출과 인증이 필요해 이번 범위에서 제외),
-인앱 브라우저와 SSH(cmux에는 있지만 이 프로젝트 범위 밖).
+**아직 안 되는 것** — PR 상태 표시(네트워크 호출과 인증이 필요하다), SSH 워크스페이스.
 
 ## 구조
 
@@ -243,13 +287,17 @@ src/
     pty-manager.ts     PTY 생명주기, 프로세스 트리 정리, 출력 배칭
     store.ts           세션·배치 영속성 (P16/P17)
   main/                Electron 메인 프로세스 — PTY를 직접 소유한다
-    ipc.ts             렌더러 ↔ PtyManager 중계
+    ipc.ts             렌더러 ↔ PtyManager 중계, 제어 소켓 다리 (P20-7)
+    control-socket.ts  named pipe 제어 서버 (P20)
     tray.ts            트레이 상주 (P18)
+  cli/                 cvmux 명령줄 도구 (P20-1)
   preload/             contextBridge 화이트리스트 API
   renderer/            React UI
     terminal-host.ts   xterm 인스턴스 수명 관리 (React 바깥)
-  shared/              main ↔ renderer 계약, 정책 상수
-tests/                 상태 감지 엔진 회귀 테스트
+    lib/control.ts     워크스페이스·pane에 대한 소켓 요청 처리 (P20-7)
+  shared/              main ↔ renderer 계약, 정책 상수, 소켓 프로토콜
+bin/                   설치본과 개발 모두에서 도는 CLI 셸
+tests/                 상태 감지 · 레이아웃 · 프로토콜 · 소켓 회귀 테스트
 ```
 
 ## 라이선스
