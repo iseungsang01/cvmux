@@ -188,6 +188,33 @@ export const M = {
   BROWSER_WAIT: 'browser.wait',
   BROWSER_SCREENSHOT: 'browser.screenshot',
 
+  /**
+   * 사이드바 메타데이터 (P25). 이름은 cmux의 CLI 계약을 그대로 따른다.
+   *
+   * 전부 main이 답한다 — 세션 → 워크스페이스는 배치에서 되짚을 수 있고(P25-6),
+   * 값 자체는 렌더러가 다시 뜨더라도 살아 있어야 하기 때문이다.
+   */
+  STATUS_SET: 'status.set',
+  STATUS_CLEAR: 'status.clear',
+  STATUS_LIST: 'status.list',
+  PROGRESS_SET: 'progress.set',
+  PROGRESS_CLEAR: 'progress.clear',
+  LOG_APPEND: 'log.append',
+  LOG_CLEAR: 'log.clear',
+  LOG_LIST: 'log.list',
+  SIDEBAR_STATE: 'sidebar.state',
+
+  TODO_ADD: 'todo.add',
+  TODO_LIST: 'todo.list',
+  TODO_SET_STATE: 'todo.set-state',
+  TODO_EDIT: 'todo.edit',
+  TODO_REMOVE: 'todo.remove',
+  TODO_CLEAR: 'todo.clear',
+  TODO_REPLACE: 'todo.set',
+
+  /** 오른쪽 사이드바. cmux의 `right-sidebar`에 해당. P25-7 */
+  RIGHT_SIDEBAR: 'right-sidebar',
+
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',
   /** 설정 파일을 다시 읽는다. P22-6 */
@@ -229,6 +256,7 @@ export const RENDERER_METHODS: ReadonlySet<string> = new Set<string>([
   M.NOTIFICATION_OPEN,
   M.APP_OPEN,
   M.APP_PANEL,
+  M.RIGHT_SIDEBAR,
   /*
    * 브라우저를 **여는 것**만 렌더러 몫이다 (P23-2).
    *

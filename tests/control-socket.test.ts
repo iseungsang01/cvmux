@@ -16,10 +16,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { NotificationStore } from '../src/core/notifications'
+import { WorkspaceMetaStore } from '../src/core/workspace-meta'
 import { DEFAULT_CONFIG } from '../src/shared/config'
 import type { BrowserManager } from '../src/main/browser'
 import type { PtyManager } from '../src/core/pty-manager'
-import type { SessionMeta } from '../src/shared/types'
+import type { SessionMeta, Workspace } from '../src/shared/types'
 import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
 
 const results: string[] = []
@@ -164,6 +165,21 @@ async function main(): Promise<void> {
 
   let focused = 0
   const inbox = new NotificationStore(() => {})
+  const metaStore = new WorkspaceMetaStore(() => {})
+  /*
+   * 세션이 어느 워크스페이스에 있는지 (P25-6).
+   *
+   * 실제로는 렌더러가 저장할 때 넘겨 준 배치다. 여기서는 세션 두 개가 한
+   * 워크스페이스에 들어 있는 가장 단순한 모양이면 충분하다.
+   */
+  const layout: Workspace[] = [
+    {
+      id: 'ws-test',
+      title: null,
+      root: { kind: 'leaf', id: 'pane-test', surfaces: ['sess-alpha', 'sess-beta'], active: 0 },
+      focusedPaneId: 'pane-test'
+    }
+  ]
   const server = new ControlSocketServer(
     {
       manager: manager as unknown as PtyManager,
@@ -178,6 +194,8 @@ async function main(): Promise<void> {
       inbox,
       // 브라우저는 이 테스트의 대상이 아니다 — 목록이 비어 있는 것으로 충분하다
       browsers: { list: () => [] } as unknown as BrowserManager,
+      meta: metaStore,
+      layout: () => layout,
       showWindow: () => {
         focused++
       },

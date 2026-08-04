@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 
-import type { SessionMeta, Workspace } from '@shared/types'
+import type { SessionMeta, Workspace, WorkspaceMeta } from '@shared/types'
 import { gitTooltip, isFailedExit, splitPorts, statusLabel, whereLabel } from '../lib/format'
 import { paneCount } from '../lib/layout'
 import { representativeSession, workspaceTitle } from '../lib/workspace'
@@ -33,6 +33,8 @@ import { representativeSession, workspaceTitle } from '../lib/workspace'
 interface SidebarProps {
   workspaces: Workspace[]
   sessions: Map<string, SessionMeta>
+  /** 에이전트가 워크스페이스에 적어 둔 것 — 상태 pill과 진행률. P25 */
+  meta: Record<string, WorkspaceMeta>
   activeId: string | null
   error: string | null
   collapsed: boolean
@@ -56,6 +58,7 @@ interface SidebarProps {
 export function Sidebar({
   workspaces,
   sessions,
+  meta,
   activeId,
   error,
   collapsed,
@@ -115,6 +118,7 @@ export function Sidebar({
             key={workspace.id}
             workspace={workspace}
             sessions={sessions}
+            meta={meta[workspace.id] ?? null}
             index={index}
             active={workspace.id === activeId}
             renaming={workspace.id === renamingId}
@@ -161,6 +165,8 @@ export function Sidebar({
 interface WorkspaceRowProps {
   workspace: Workspace
   sessions: Map<string, SessionMeta>
+  /** 이 줄에 붙는 상태 pill과 진행률. 없으면 null. P25 */
+  meta: WorkspaceMeta | null
   index: number
   active: boolean
   renaming: boolean
@@ -182,6 +188,7 @@ interface WorkspaceRowProps {
 function WorkspaceRow({
   workspace,
   sessions,
+  meta,
   index,
   active,
   renaming,
@@ -297,6 +304,14 @@ function WorkspaceRow({
 
           <SessionFacts session={session} />
 
+          {/*
+            에이전트가 적어 둔 것 (P25-1 / P25-2).
+
+            cvmux가 출력을 보고 짐작한 상태(아래 줄)와 **다른 층위**다. 이쪽은
+            에이전트가 직접 한 말이라 훨씬 정확하고, 그래서 상태 줄보다 위에 둔다.
+          */}
+          <WorkspaceProgressRow meta={meta} />
+
           {/* 지금 어떤가 — 흘러가는 출력 대신 상태 그 자체. P19-2 */}
           <div
             className={`session-status is-${session.status}${
@@ -397,6 +412,55 @@ function TitleEditor({ value, onCommit, onCancel }: TitleEditorProps): JSX.Eleme
       // 다른 곳을 눌러 빠져나가도 친 내용은 지킨다 — 취소는 Escape로만
       onBlur={(event) => onCommit(event.currentTarget.value.trim() || null)}
     />
+  )
+}
+
+/**
+ * 상태 pill과 진행률 (P25-1 / P25-2).
+ *
+ * 적힌 것이 없으면 아무것도 그리지 않는다 — 빈 자리를 미리 잡아 두면 쓰지
+ * 않는 사용자의 사이드바가 이유 없이 헐거워진다.
+ */
+function WorkspaceProgressRow({ meta }: { meta: WorkspaceMeta | null }): JSX.Element | null {
+  if (!meta) return null
+  const { status, progress } = meta
+  if (status.length === 0 && progress === null) return null
+
+  return (
+    <div className="session-meta">
+      {status.length > 0 && (
+        <div className="session-pills">
+          {status.map((pill) => (
+            <span
+              key={pill.name}
+              className="session-pill"
+              title={`${pill.name}: ${pill.text}`}
+              style={pill.color ? { borderColor: pill.color, color: pill.color } : undefined}
+            >
+              {pill.text}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {progress !== null && (
+        <div className="session-progress" title={progress.text ?? undefined}>
+          {/*
+            끝을 모르는 채 돌고 있으면 흐르는 막대다 (P25-2).
+
+            0%짜리 막대를 그리면 "시작도 안 했다"로 읽힌다 — 실제로는 몇 분의
+            몇인지 모르는 것뿐인데.
+          */}
+          <div
+            className={`session-progress-bar${progress.value === null ? ' is-unknown' : ''}`}
+            style={progress.value === null ? undefined : { width: `${Math.round(progress.value * 100)}%` }}
+          />
+          {progress.text !== null && (
+            <span className="session-progress-text">{progress.text}</span>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -15,6 +15,7 @@ import {
 } from './browser-agent'
 import type { ConfigSnapshot } from '@core/config-store'
 import type { NotificationStore } from '@core/notifications'
+import { workspaceOfSession, type WorkspaceMetaStore } from '@core/workspace-meta'
 import type { PtyManager } from '@core/pty-manager'
 import {
   CONTROL_EVENT_BUFFER,
@@ -29,7 +30,7 @@ import {
   type ControlEventFrame,
   type ControlRequest
 } from '@shared/protocol'
-import type { Notification, SessionMeta } from '@shared/types'
+import type { Notification, SessionMeta, TodoItem, Workspace } from '@shared/types'
 
 /**
  * 제어 소켓 서버 (P20).
@@ -65,6 +66,10 @@ export interface ControlHost {
   inbox: NotificationStore
   /** 내장 브라우저. 화면 자체는 main이 들고 있다. P23 */
   browsers: BrowserManager
+  /** 사이드바 메타데이터. 에이전트가 여기에 적는다. P25 */
+  meta: WorkspaceMetaStore
+  /** 지금 배치 — 세션이 어느 워크스페이스에 있는지 되짚는 데 쓴다. P25-6 */
+  layout(): Workspace[]
   /** 창을 앞으로 가져온다 — `cvmux open`과 `app.focus`가 쓴다 */
   showWindow(): void
   /** 설정 파일을 다시 읽는다. P22-6 */
@@ -506,6 +511,129 @@ export class ControlSocketServer {
       case M.BROWSER_SCREENSHOT:
         return { png_base64: await this.host.browsers.screenshot(this.browser(params)) }
 
+      // ── 사이드바 메타데이터 (P25) ────────────────────────────
+      case M.STATUS_SET: {
+        const id = await this.workspace(params)
+        const name = String(params.name ?? 'status')
+        const text = String(params.text ?? params.value ?? '')
+        if (!text) throw new ControlError('invalid_params', '표시할 내용이 필요합니다')
+        return this.host.meta.setStatus(id, name, text, optional(params.color))
+      }
+
+      case M.STATUS_CLEAR: {
+        const id = await this.workspace(params)
+        return { removed: this.host.meta.clearStatus(id, optional(params.name)) }
+      }
+
+      case M.STATUS_LIST:
+        return { status: this.host.meta.get(await this.workspace(params)).status }
+
+      case M.PROGRESS_SET: {
+        const id = await this.workspace(params)
+        const raw = params.value ?? params.progress
+        // 값이 없으면 끝을 모르는 채 돌고 있다는 뜻이다 — 흐르는 막대가 뜬다
+        const value = raw === undefined || raw === null ? null : Number(raw)
+        if (value !== null && !Number.isFinite(value)) {
+          throw new ControlError('invalid_params', '진행률은 0과 1 사이의 수여야 합니다')
+        }
+        this.host.meta.setProgress(id, value, optional(params.text))
+        return this.host.meta.get(id).progress
+      }
+
+      case M.PROGRESS_CLEAR:
+        this.host.meta.clearProgress(await this.workspace(params))
+        return { cleared: true }
+
+      case M.LOG_APPEND: {
+        const id = await this.workspace(params)
+        const text = String(params.text ?? params.message ?? '')
+        if (!text) throw new ControlError('invalid_params', '남길 내용이 필요합니다')
+        const level = String(params.level ?? 'info')
+        const known = ['info', 'warn', 'error', 'success']
+        if (!known.includes(level)) {
+          throw new ControlError('invalid_params', `level은 ${known.join('/')} 중 하나여야 합니다`)
+        }
+        return this.host.meta.log(id, text, level as 'info' | 'warn' | 'error' | 'success')
+      }
+
+      case M.LOG_CLEAR:
+        this.host.meta.clearLog(await this.workspace(params))
+        return { cleared: true }
+
+      case M.LOG_LIST: {
+        const entries = this.host.meta.get(await this.workspace(params)).log
+        const limit = Number(params.limit ?? 0)
+        return { log: limit > 0 ? entries.slice(-limit) : entries }
+      }
+
+      case M.SIDEBAR_STATE: {
+        const id = await this.workspace(params)
+        return { workspace_id: id, ...this.host.meta.get(id) }
+      }
+
+      // ── 체크리스트 (P25-4) ───────────────────────────────────
+      case M.TODO_ADD: {
+        const id = await this.workspace(params)
+        const text = String(params.text ?? '')
+        if (!text.trim()) throw new ControlError('invalid_params', '항목 내용이 필요합니다')
+        const state = todoState(params.state)
+        const origin = params.origin === 'user' ? 'user' : 'agent'
+        try {
+          return this.host.meta.addTodo(id, text, state, origin)
+        } catch (error) {
+          throw new ControlError('invalid_state', error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      case M.TODO_LIST:
+        return { todo: this.host.meta.get(await this.workspace(params)).todo }
+
+      case M.TODO_SET_STATE: {
+        const id = await this.workspace(params)
+        const ref = String(params.item ?? params.ref ?? '')
+        const item = this.host.meta.setTodoState(id, ref, todoState(params.state))
+        if (!item) throw new ControlError('not_found', `항목을 찾을 수 없습니다: ${ref}`)
+        return item
+      }
+
+      case M.TODO_EDIT: {
+        const id = await this.workspace(params)
+        const ref = String(params.item ?? params.ref ?? '')
+        const item = this.host.meta.editTodo(id, ref, String(params.text ?? ''))
+        if (!item) throw new ControlError('not_found', `항목을 찾을 수 없습니다: ${ref}`)
+        return item
+      }
+
+      case M.TODO_REMOVE: {
+        const id = await this.workspace(params)
+        const ref = String(params.item ?? params.ref ?? '')
+        if (!this.host.meta.removeTodo(id, ref)) {
+          throw new ControlError('not_found', `항목을 찾을 수 없습니다: ${ref}`)
+        }
+        return { removed: true }
+      }
+
+      case M.TODO_CLEAR:
+        this.host.meta.clearTodo(await this.workspace(params))
+        return { cleared: true }
+
+      /*
+       * 목록을 통째로 갈아 끼운다 (P25-5).
+       *
+       * 감시 루프가 매 틱마다 전체를 다시 보내도 체크박스의 정체가 유지되게
+       * id를 존중한다. 하나라도 잘못되면 아무것도 바꾸지 않는다.
+       */
+      case M.TODO_REPLACE: {
+        const id = await this.workspace(params)
+        const raw = params.items
+        if (!Array.isArray(raw)) throw new ControlError('invalid_params', 'items는 배열이어야 합니다')
+        try {
+          return { todo: this.host.meta.replaceTodo(id, raw as Array<Record<string, never>>) }
+        } catch (error) {
+          throw new ControlError('invalid_params', error instanceof Error ? error.message : String(error))
+        }
+      }
+
       case M.APP_FOCUS:
         this.host.showWindow()
         return { focused: true }
@@ -602,6 +730,52 @@ export class ControlSocketServer {
   }
 
   /**
+   * 워크스페이스 지정 (P25-6).
+   *
+   * 인자가 없으면 **부르는 쪽의 세션이 있는 워크스페이스**다. 세션 안의
+   * 에이전트는 자기 워크스페이스 id를 모르고 `CVMUX_SESSION_ID`만 아는데,
+   * 그것만으로 자기 사이드바 줄에 쓸 수 있어야 한다.
+   */
+  private async workspace(params: Record<string, unknown>): Promise<string> {
+    const layout = this.host.layout()
+
+    const explicit = optional(params.workspace)
+    if (explicit !== undefined) {
+      const found = resolveHandle(layout, explicit, 'workspace')
+      if (!found) throw new ControlError('not_found', `워크스페이스를 찾을 수 없습니다: ${explicit}`)
+      return found.id
+    }
+
+    const sessionId = optional(params.session)
+    if (sessionId !== undefined) {
+      const session = this.session(sessionId)
+      const found = workspaceOfSession(layout, session.id)
+      if (found) return found.id
+
+      /*
+       * 캐시가 아직 비었을 수 있다 (P25-6).
+       *
+       * main이 들고 있는 배치는 렌더러가 저장할 때마다 갱신되므로, 앱이 막 뜬
+       * 직후에는 아직 비어 있다. 그때 실패로 끝내면 세션이 시작하자마자 부른
+       * 에이전트만 유독 실패한다 — 그래서 렌더러에게 직접 한 번 더 묻는다.
+       */
+      const asked = (await this.host.bridge.call(M.NOTIFICATION_OPEN, {
+        session: session.id
+      })) as { workspace_id?: unknown }
+      if (typeof asked.workspace_id === 'string') return asked.workspace_id
+      throw new ControlError('not_found', '그 세션이 있는 워크스페이스를 찾지 못했습니다')
+    }
+
+    if (layout.length === 0) {
+      throw new ControlError('invalid_state', '열린 워크스페이스가 없습니다')
+    }
+    throw new ControlError(
+      'invalid_params',
+      '워크스페이스를 지정해야 합니다 (--workspace 또는 --session)'
+    )
+  }
+
+  /**
    * 브라우저 화면 지정 (P23-3).
    *
    * 인자가 없으면 딱 하나 열려 있을 때만 그것을 쓴다. 여럿일 때 아무거나
@@ -629,6 +803,13 @@ export class ControlSocketServer {
   takeId(): number {
     return this.nextId++
   }
+}
+
+/** 체크리스트 상태 이름. 모르는 값은 대기로 본다 */
+function todoState(value: unknown): TodoItem['state'] {
+  const text = String(value ?? 'pending')
+  if (text === 'in-progress' || text === 'completed') return text
+  return 'pending'
 }
 
 function optional(value: unknown): string | undefined {

@@ -104,6 +104,56 @@ export interface BrowserRect {
 }
 
 /**
+ * 사이드바에 붙는 상태 pill (P25-1).
+ *
+ * 에이전트가 "지금 무엇을 하는 중인지"를 스스로 적는 자리다. cvmux가 출력을
+ * 보고 짐작하는 상태(P4)와 달리 이것은 **에이전트가 직접 한 말**이다.
+ */
+export interface StatusPill {
+  /** 같은 이름으로 다시 쓰면 덮어쓴다 — 단계가 바뀌어도 줄이 쌓이지 않게 */
+  name: string
+  text: string
+  /** `#rrggbb`. 없으면 기본색 */
+  color: string | null
+  at: number
+}
+
+/** 진행률. `value`가 없으면 끝을 모르는 채 돌고 있다는 뜻이다. P25-2 */
+export interface WorkspaceProgress {
+  value: number | null
+  text: string | null
+  at: number
+}
+
+/** 에이전트가 사람에게 남기는 한 줄. 터미널 출력과 다른 자리다. P25-3 */
+export interface WorkspaceLogEntry {
+  id: string
+  text: string
+  level: 'info' | 'warn' | 'error' | 'success'
+  at: number
+}
+
+/** 체크리스트 한 항목. P25-4 */
+export interface TodoItem {
+  id: string
+  text: string
+  state: 'pending' | 'in-progress' | 'completed'
+  /** 누가 만들었는가 — 사람이 적은 것을 에이전트가 지우지 못하게 하는 근거 */
+  origin: 'user' | 'agent'
+}
+
+/** 워크스페이스 하나에 붙는 것 전부. P25 */
+export interface WorkspaceMeta {
+  status: StatusPill[]
+  progress: WorkspaceProgress | null
+  log: WorkspaceLogEntry[]
+  todo: TodoItem[]
+}
+
+/** 오른쪽 사이드바가 지금 무엇을 보여주는가. P25-7 */
+export type RightSidebarMode = 'log' | 'todo' | 'sessions' | 'find'
+
+/**
  * 워크스페이스 안의 pane 배치 (P17).
  *
  * 잎(leaf)이 터미널 하나, 가지(split)가 나눔이다. 분할하지 않으면 root가 곧
@@ -203,6 +253,11 @@ export const IPC = {
   CTL_REPLY: 'ctl:reply',
   /** 설정. P22 */
   CONFIG: 'config:get',
+  /** 워크스페이스 메타데이터. P25 */
+  WORKSPACE_META: 'meta:get',
+  TODO_SET_STATE: 'meta:todo-state',
+  TODO_REMOVE: 'meta:todo-remove',
+  TODO_ADD: 'meta:todo-add',
   /** 내장 브라우저. P23 */
   BROWSER_CREATE: 'browser:create',
   BROWSER_PLACE: 'browser:place',
@@ -231,7 +286,11 @@ export const IPC = {
   /** 설정 파일이 바뀌었다. P22-4 */
   EVT_CONFIG: 'evt:config',
   /** 브라우저 화면의 주소·제목·로딩 상태가 바뀌었다. P23 */
-  EVT_BROWSER: 'evt:browser'
+  EVT_BROWSER: 'evt:browser',
+  /** 워크스페이스 메타데이터가 바뀌었다. P25 */
+  EVT_WORKSPACE_META: 'evt:workspace-meta',
+  /** 소켓이 오른쪽 사이드바를 열라고 한다. P25-7 */
+  EVT_RIGHT_SIDEBAR: 'evt:right-sidebar'
 } as const
 
 /** 주소창 버튼이 보내는 것들. P23-1 */
@@ -290,6 +349,12 @@ export interface CvmuxApi {
   /** 지금 적용된 설정. P22 */
   config(): Promise<CvmuxConfig>
 
+  /** 워크스페이스 메타데이터. P25 */
+  workspaceMeta(): Promise<Record<string, WorkspaceMeta>>
+  todoAdd(workspaceId: string, text: string): Promise<boolean>
+  todoSetState(workspaceId: string, ref: string, state: TodoItem['state']): Promise<boolean>
+  todoRemove(workspaceId: string, ref: string): Promise<boolean>
+
   /** 내장 브라우저. P23 */
   browserCreate(url: string): Promise<BrowserMeta>
   browserPlace(id: string, rect: BrowserRect | null): Promise<boolean>
@@ -315,4 +380,6 @@ export interface CvmuxApi {
   onNotifications(cb: (items: Notification[]) => void): () => void
   onConfig(cb: (config: CvmuxConfig) => void): () => void
   onBrowser(cb: (meta: BrowserMeta) => void): () => void
+  onWorkspaceMeta(cb: (meta: Record<string, WorkspaceMeta>) => void): () => void
+  onRightSidebar(cb: (state: { open: boolean; mode: RightSidebarMode }) => void): () => void
 }

@@ -138,5 +138,15 @@ export const POLICY = {
   MAX_NOTIFICATIONS: 200,
 
   /** 명령 팔레트가 한 번에 보여줄 최대 항목 수. P21-6 */
-  PALETTE_MAX_RESULTS: 40
+  PALETTE_MAX_RESULTS: 40,
+
+  /** 사이드바 한 줄에 붙는 상태 pill의 최대 개수. 넘치면 오래된 것부터. P25-1 */
+  MAX_STATUS_PILLS: 4,
+
+  /** 워크스페이스 로그가 들고 있는 최대 줄 수. P25-3 */
+  MAX_WORKSPACE_LOG: 500,
+
+  /** 체크리스트 항목 상한과 한 줄 길이. cmux와 같은 값이다. P25-4 */
+  MAX_TODO_ITEMS: 50,
+  MAX_TODO_TEXT: 500
 } as const

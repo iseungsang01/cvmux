@@ -83,6 +83,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   'pane.split.right': 'Alt+Shift+Equal',
   'pane.split.down': 'Alt+Shift+Minus',
   'view.sidebar': 'Ctrl+Shift+B',
+  'view.right-sidebar': 'Alt+Shift+B',
   'view.palette': 'Ctrl+Shift+P',
   'notifications.show': 'Ctrl+Shift+I',
   'notifications.jump': 'Ctrl+Shift+U',

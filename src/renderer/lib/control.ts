@@ -17,6 +17,8 @@ export interface ControlContext {
   /** 열려 있는 브라우저 화면. 탭 목록이 종류와 제목을 여기서 가져온다. P23-2 */
   browsers(): Map<string, BrowserMeta>
   activeId(): string | null
+  /** 오른쪽 사이드바가 지금 열려 있는가 — toggle이 이걸 본다. P25-7 */
+  rightSidebarOpen(): boolean
 
   select(workspaceId: string): void
   create(options: { cwd?: string; title?: string }): Promise<string>
@@ -43,6 +45,8 @@ export interface ControlContext {
   selectSurface(workspaceId: string, paneId: string, index: number): void
   /** 잎 하나를 트리에서 걷어낸다 — 브라우저를 소켓에서 닫았을 때. P23-2 */
   dropSurface(surfaceId: string): void
+  /** 오른쪽 사이드바를 열고 닫는다. P25-7 */
+  setRightSidebar(open: boolean, mode?: 'log' | 'todo' | 'sessions' | 'find'): void
   /** 알림함·팔레트·찾기를 열고 닫는다. P21-11 */
   setPanel(
     panel: 'notifications' | 'palette' | 'find',
@@ -263,6 +267,29 @@ export async function handleControl(
       const id = optionalString(params.browser)
       if (id !== undefined) ctx.dropSurface(id)
       return { dropped: id ?? null }
+    }
+
+    /*
+     * 오른쪽 사이드바 (P25-7).
+     *
+     * cmux의 `right-sidebar toggle|show|hide|set <mode>`와 같은 자리다.
+     * 에이전트가 로그를 남긴 뒤 "여기 보라"고 열어 줄 수 있어야 한다.
+     */
+    case M.RIGHT_SIDEBAR: {
+      const action = optionalString(params.action) ?? 'toggle'
+      const mode = optionalString(params.mode)
+      if (mode !== undefined && !['log', 'todo', 'sessions', 'find'].includes(mode)) {
+        throw new ControlRequestError('mode는 log/todo/sessions/find 중 하나여야 합니다')
+      }
+
+      const known = ['toggle', 'show', 'hide', 'set']
+      if (!known.includes(action)) {
+        throw new ControlRequestError(`action은 ${known.join('/')} 중 하나여야 합니다`)
+      }
+
+      const open = action === 'hide' ? false : action === 'toggle' ? !ctx.rightSidebarOpen() : true
+      ctx.setRightSidebar(open, mode as 'log' | 'todo' | 'sessions' | 'find' | undefined)
+      return { open, mode: mode ?? null }
     }
 
     case M.APP_OPEN: {

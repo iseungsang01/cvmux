@@ -38,8 +38,10 @@ macOS를 쓴다면 cvmux 대신 cmux를 받는 편이 낫다 — 훨씬 완성�
 - **내장 브라우저** — 터미널 옆에 진짜 브라우저를 띄우고, 에이전트가 그것을 조종해
   자기가 고친 화면을 직접 확인한다
 - **에이전트 이어서 띄우기** — 앱을 껐다 켜면 Claude Code 대화가 그 자리에서 이어진다
-- 설정 파일 · 단축키 커스터마이즈 · 명령 팔레트 · 찾기 · 분할 창 · 세션 영속성 ·
-  한글 UTF-8 · 트루컬러
+- **에이전트가 쓰는 사이드바** — 상태 pill·진행률·로그·체크리스트를 에이전트가
+  직접 적는다. 짐작이 아니라 당사자의 말이다
+- 가로 탭 · 설정 파일 · 단축키 커스터마이즈 · 명령 팔레트 · 찾기 · 분할 창 ·
+  세션 영속성 · 한글 UTF-8 · 트루컬러
 
 ## 설치와 실행
 
@@ -124,6 +126,47 @@ Windows Terminal과 같고(`Alt+Shift+=` 오른쪽, `Alt+Shift+-` 아래), 경�
 
 여러 pane 중 **가장 손이 필요한 pane**이 사이드바 대표로 올라온다. 실행 중인
 pane 하나가 확인을 기다리는 pane을 가려서는 안 되기 때문이다.
+
+## 가로 탭
+
+pane 하나가 탭을 여럿 담는다. 화면을 더 나눌 자리가 없는데 세션은 더 필요할 때
+분할 대신 쓴다. 탭이 하나뿐이면 탭 바를 그리지 않으므로, 쓰지 않으면 보이지 않는다.
+
+| 키 | 동작 |
+|----|------|
+| `Ctrl+Shift+T` | 이 pane에 새 탭 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 다음 / 이전 탭 |
+
+활성 탭을 닫으면 **왼쪽**으로 간다 — 오른쪽으로 가면 연달아 닫을 때 커서가
+목록 끝까지 밀려가고 방금 보던 자리에서 멀어진다.
+
+## 에이전트가 사이드바에 쓰기
+
+사이드바의 신호등(P4)은 출력을 보고 **짐작한** 것이다. 에이전트는 자기가 지금
+어디까지 갔는지 알고 있으므로, 그것을 직접 적을 수 있다.
+
+```powershell
+cvmux set-status --name build "테스트 12/40"
+cvmux set-progress 0.3 --text "browser.test.ts"
+cvmux log --level warn "느린 테스트 3개를 건너뜁니다"
+```
+
+상태 pill은 같은 이름으로 다시 쓰면 덮어쓴다 — 단계가 바뀌어도 줄이 쌓이지
+않는다. 진행률은 값을 비우면 "끝을 모르는 채 돌고 있다"는 뜻의 흐르는 막대가 된다.
+
+체크리스트도 같은 자리에 있다.
+
+```powershell
+cvmux todo add "테스트 통과시키기"
+cvmux todo start 1
+cvmux todo check 1
+
+# 감시 루프에서 전체를 매번 다시 보내도 체크박스의 정체는 유지된다
+./plan.ps1 | cvmux todo set
+```
+
+`Alt+Shift+B`로 오른쪽 사이드바를 열면 로그·할 일·세션·찾기를 볼 수 있다.
+`cvmux right-sidebar set --mode log`로 에이전트가 직접 열어 줄 수도 있다.
 
 ## 에이전트에서 알림 보내기
 
@@ -356,6 +399,9 @@ cvmux hooks record --agent codex
 | `Ctrl+Shift+U` | 읽지 않은 알림으로 이동 |
 | `Alt+F` | 이 화면에서 찾기 |
 | `Ctrl+Shift+F` | 모든 세션에서 찾기 |
+| `Ctrl+Shift+T` | 이 pane에 새 탭 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 다음 / 이전 탭 |
+| `Alt+Shift+B` | 오른쪽 사이드바 |
 
 전부 `cvmux.json`의 `keybindings`에서 바꿀 수 있다.
 | `Ctrl+V` | 붙여넣기 (클립보드에 이미지만 있으면 그대로 세션에 전달) |
@@ -419,6 +465,7 @@ src/
     ansi-parser.ts     증분 ANSI/OSC 파서 (청크 경계에 걸린 시퀀스 처리)
     session-state.ts   상태 판정 엔진 (P4)
     notifications.ts   알림함 (P21)
+    workspace-meta.ts  사이드바 메타데이터 (P25)
     config-store.ts    설정 파일 읽기·감시 (P22)
     agent-sessions.ts  에이전트 대화 기록 (P22-8)
     pty-manager.ts     PTY 생명주기, 프로세스 트리 정리, 출력 배칭

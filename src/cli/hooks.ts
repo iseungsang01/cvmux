@@ -105,7 +105,8 @@ export async function readHookPayload(): Promise<Record<string, unknown>> {
 
   const chunks: Buffer[] = []
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
-  const text = Buffer.concat(chunks).toString('utf8').trim()
+  // BOM이 붙어 오면 JSON.parse가 막힌다 — Windows 파이프에서 흔한 일이다
+  const text = Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '').trim()
   if (text === '') return {}
 
   try {

@@ -2,10 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 
 import { DEFAULT_CONFIG, type CvmuxConfig } from '@shared/config'
 import { actionFor, compileBindings, formatChord, type Chord } from '@shared/keys'
-import type { BrowserMeta, Notification, SessionMeta, Workspace } from '@shared/types'
+import type {
+  BrowserMeta,
+  Notification,
+  RightSidebarMode,
+  SessionMeta,
+  Workspace,
+  WorkspaceMeta
+} from '@shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { FindBar, type FindHit } from './components/FindBar'
 import { NotificationPanel } from './components/NotificationPanel'
+import { RightSidebar } from './components/RightSidebar'
 import { PaneTree } from './components/PaneTree'
 import { Sidebar } from './components/Sidebar'
 import {
@@ -52,6 +60,12 @@ export function App(): JSX.Element {
   const [config, setConfig] = useState<CvmuxConfig>(DEFAULT_CONFIG)
   /** 열려 있는 내장 브라우저 화면. 잎이 가리키는 id가 여기 있으면 브라우저다. P23-2 */
   const [browsers, setBrowsers] = useState<Map<string, BrowserMeta>>(() => new Map())
+  /** 워크스페이스마다 에이전트가 적어 둔 것. P25 */
+  const [workspaceMeta, setWorkspaceMeta] = useState<Record<string, WorkspaceMeta>>({})
+  const [rightSidebar, setRightSidebar] = useState<{ open: boolean; mode: RightSidebarMode }>({
+    open: false,
+    mode: 'log'
+  })
   const [find, setFind] = useState<{
     open: boolean
     query: string
@@ -66,6 +80,7 @@ export function App(): JSX.Element {
   const sessionsRef = useRef<SessionMeta[]>([])
   const composingRef = useRef(false)
   const browsersRef = useRef<Map<string, BrowserMeta>>(new Map())
+  const rightSidebarRef = useRef(false)
 
   /**
    * 동작 실행기 (P22-5).
@@ -81,6 +96,7 @@ export function App(): JSX.Element {
   workspacesRef.current = workspaces
   sessionsRef.current = sessions
   browsersRef.current = browsers
+  rightSidebarRef.current = rightSidebar.open
 
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications])
@@ -657,6 +673,15 @@ export function App(): JSX.Element {
     setFind((prev) => ({ ...prev, open: true, scope, index: 0, count: 0 }))
   }, [])
 
+  // ── 사이드바 메타데이터 (P25) ────────────────────────────────
+  useEffect(() => {
+    void window.cvmux.workspaceMeta().then(setWorkspaceMeta)
+    return window.cvmux.onWorkspaceMeta(setWorkspaceMeta)
+  }, [])
+
+  // 소켓에서 오른쪽 사이드바를 열 수 있다 (P25-7 / P21-11과 같은 이유)
+  useEffect(() => window.cvmux.onRightSidebar(setRightSidebar), [])
+
   // ── 내장 브라우저 (P23) ──────────────────────────────────────
   useEffect(() => {
     void window.cvmux.browserList().then((list) => {
@@ -867,6 +892,14 @@ export function App(): JSX.Element {
         run: () => void openBrowser('about:blank').catch(() => undefined)
       },
       {
+        id: 'view.right-sidebar',
+        title: rightSidebar.open ? '오른쪽 사이드바 닫기' : '오른쪽 사이드바',
+        keywords: 'right sidebar log todo panel',
+        hint: hint('view.right-sidebar'),
+        section: '보기',
+        run: () => setRightSidebar((prev) => ({ ...prev, open: !prev.open }))
+      },
+      {
         id: 'view.sidebar',
         title: sidebarCollapsed ? '사이드바 펴기' : '사이드바 접기',
         keywords: 'sidebar toggle view',
@@ -905,6 +938,7 @@ export function App(): JSX.Element {
     openFind,
     openSurface,
     sessionMap,
+    rightSidebar.open,
     sidebarCollapsed,
     splitFocused,
     workspaces
@@ -952,6 +986,7 @@ export function App(): JSX.Element {
       workspaces: () => workspacesRef.current,
       sessions: () => new Map(sessionsRef.current.map((s) => [s.id, s])),
       browsers: () => browsersRef.current,
+      rightSidebarOpen: () => rightSidebarRef.current,
       activeId: () => activeIdRef.current,
       select: setActiveId,
       create: (options) => createWorkspace(options),
@@ -971,6 +1006,9 @@ export function App(): JSX.Element {
       dropSurface,
       markRead: (id) => {
         void window.cvmux.markRead(id)
+      },
+      setRightSidebar: (open, mode) => {
+        setRightSidebar((prev) => ({ open, mode: mode ?? prev.mode }))
       },
       setPanel: (panel, open, scope, query) => {
         if (panel === 'notifications') setInboxOpen(open)
@@ -1066,6 +1104,7 @@ export function App(): JSX.Element {
         <Sidebar
           workspaces={workspaces}
           sessions={sessionMap}
+          meta={workspaceMeta}
           activeId={activeId}
           error={error}
           collapsed={sidebarCollapsed}
@@ -1134,6 +1173,21 @@ export function App(): JSX.Element {
             </div>
           )}
         </main>
+
+        <RightSidebar
+          open={rightSidebar.open}
+          mode={rightSidebar.mode}
+          meta={activeId !== null ? (workspaceMeta[activeId] ?? null) : null}
+          workspaceId={activeId}
+          sessions={activeWorkspace ? visibleSessions(activeWorkspace, sessionMap) : []}
+          findQuery={find.query}
+          onModeChange={(mode) => setRightSidebar((prev) => ({ ...prev, mode }))}
+          onClose={() => setRightSidebar((prev) => ({ ...prev, open: false }))}
+          onFocusSession={(sessionId) => revealSession(sessionId)}
+          onFindChange={(query) => {
+            setFind((prev) => ({ ...prev, open: true, scope: 'all', query }))
+          }}
+        />
       </div>
 
       <CommandPalette
@@ -1150,6 +1204,16 @@ export function App(): JSX.Element {
  *
  * 보이는 것만 세면 탭 뒤의 세션이 조용히 남아 프로세스만 살아 있게 된다.
  */
+/** 이 워크스페이스가 붙들고 있는 세션들 — 오른쪽 사이드바의 '세션' 목록. P25-7 */
+function visibleSessions(
+  workspace: Workspace,
+  sessions: Map<string, SessionMeta>
+): SessionMeta[] {
+  return collectAllSurfaces(workspace.root)
+    .map((id) => sessions.get(id))
+    .filter((meta): meta is SessionMeta => meta !== undefined)
+}
+
 function paneSessionIds(workspace: Workspace): string[] {
   return collectAllSurfaces(workspace.root)
 }

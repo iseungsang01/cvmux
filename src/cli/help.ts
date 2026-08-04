@@ -85,6 +85,26 @@ pane:
   browser screenshot     PNG를 base64로
   browser close          닫기
 
+사이드바에 쓰기 (에이전트용):
+  set-status <내용>      상태 pill (--name으로 자리 구분, --color)
+  clear-status [이름]    지우기
+  list-status            목록
+  set-progress <0~1>     진행률 (--text). 값을 비우면 끝을 모르는 채 도는 표시
+  clear-progress         지우기
+  log <내용>             기록 한 줄 (--level info|warn|error|success)
+  list-log               기록 목록 (--limit)
+  clear-log              기록 비우기
+  sidebar-state          지금 적힌 것 전부
+  right-sidebar [동작]   오른쪽 사이드바 (toggle|show|hide|set --mode log|todo|sessions|find)
+
+체크리스트:
+  todo add <내용>        항목 추가
+  todo list              목록
+  todo check|uncheck|start <번호>   상태 바꾸기
+  todo edit <번호> <내용>
+  todo rm <번호> / todo clear
+  todo set ['<json>']    목록 통째로 교체 (stdin도 받는다)
+
 설정:
   config path            설정 파일 자리
   config init            주석이 달린 본보기 만들기
@@ -150,6 +170,17 @@ const USAGE: Record<string, string> = {
     'Usage: cvmux browser <open|list|goto|back|forward|reload|snapshot|click|fill|press|get|wait|eval|screenshot|close> [args] [--browser <handle>] [--ref <e12>] [--selector <css>]',
   config: 'Usage: cvmux config <path|init|doctor|reload> [--path <file>] [--json]',
   hooks: 'Usage: cvmux hooks <setup|uninstall|status|record|notify> [--agent <name>]',
+  'set-status': 'Usage: cvmux set-status <text> [--name <name>] [--color #rrggbb]',
+  'clear-status': 'Usage: cvmux clear-status [name]',
+  'list-status': 'Usage: cvmux list-status',
+  'set-progress': 'Usage: cvmux set-progress [0..1] [--text <text>]',
+  'clear-progress': 'Usage: cvmux clear-progress',
+  log: 'Usage: cvmux log <text> [--level info|warn|error|success]',
+  'list-log': 'Usage: cvmux list-log [--limit <n>]',
+  'clear-log': 'Usage: cvmux clear-log',
+  'sidebar-state': 'Usage: cvmux sidebar-state',
+  'right-sidebar': 'Usage: cvmux right-sidebar <toggle|show|hide|set> [--mode log|todo|sessions|find]',
+  todo: 'Usage: cvmux todo <add|list|check|uncheck|start|edit|rm|clear|set> [args]',
   open: 'Usage: cvmux open <path>',
   version: 'Usage: cvmux version',
   help: 'Usage: cvmux help'

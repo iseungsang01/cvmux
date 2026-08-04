@@ -37,6 +37,34 @@ export function render(command: string, result: unknown, json: boolean): string 
     case 'read-screen':
       return String(value.text ?? '')
 
+    // ── 사이드바 메타데이터 (P25) ────────────────────────────
+    case 'todo': {
+      const list = rows(value.todo)
+      if (list.length === 0) return '할 일이 없습니다.'
+      // 번호를 함께 찍는다 — 그대로 `todo check 2`에 되쓸 수 있어야 한다
+      return table(
+        list.map((item, i) => ({ '#': i + 1, ...item, mark: todoMark(item.state) })),
+        ['#', 'mark', 'text', 'origin']
+      )
+    }
+
+    case 'list-status': {
+      const list = rows(value.status)
+      if (list.length === 0) return '적힌 상태가 없습니다.'
+      return table(list, ['name', 'text'])
+    }
+
+    case 'list-log': {
+      const list = rows(value.log)
+      if (list.length === 0) return '기록이 없습니다.'
+      return list
+        .map((entry) => `${clock(entry.at)}  ${pad(format(entry.level), 7)}  ${format(entry.text)}`)
+        .join('\n')
+    }
+
+    case 'sidebar-state':
+      return JSON.stringify(result, null, 2)
+
     case 'tree':
       return rows(value.workspaces)
         .map((w) => `${w.ref}  ${w.title}\n${drawTree(w.tree, '  ')}`)
@@ -84,13 +112,59 @@ function table(list: Row[], columns: string[]): string {
   if (list.length === 0) return '(없음)'
 
   const widths = columns.map((column) =>
-    Math.max(column.length, ...list.map((row) => format(row[column]).length))
+    Math.max(width(column), ...list.map((row) => width(format(row[column]))))
   )
 
   const line = (cells: string[]): string =>
-    cells.map((cell, i) => cell.padEnd(widths[i])).join('  ').trimEnd()
+    cells.map((cell, i) => pad(cell, widths[i])).join('  ').trimEnd()
 
   return [line(columns), ...list.map((row) => line(columns.map((c) => format(row[c]))))].join('\n')
+}
+
+/**
+ * 터미널에서 차지하는 칸 수 (P20-1).
+ *
+ * 한글과 이모지는 한 글자가 두 칸이다. `padEnd`는 글자 수만 세므로 한글이 섞인
+ * 표는 열이 어긋난다 — 이 앱의 출력은 대부분 한글이라 그냥 두면 표가 늘 삐뚤다.
+ */
+function width(text: string): number {
+  let total = 0
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    total += isWide(code) ? 2 : 1
+  }
+  return total
+}
+
+function isWide(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x115f) || // 한글 자모
+    (code >= 0x2e80 && code <= 0xa4cf) || // CJK 부수·한자·가나
+    (code >= 0xac00 && code <= 0xd7a3) || // 한글 음절
+    (code >= 0xf900 && code <= 0xfaff) || // CJK 호환 한자
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) || // 전각 기호
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x1f300 && code <= 0x1f64f) || // 이모지
+    (code >= 0x1f900 && code <= 0x1f9ff)
+  )
+}
+
+function pad(text: string, to: number): string {
+  return text + ' '.repeat(Math.max(0, to - width(text)))
+}
+
+function todoMark(state: unknown): string {
+  if (state === 'completed') return '[x]'
+  if (state === 'in-progress') return '[~]'
+  return '[ ]'
+}
+
+function clock(at: unknown): string {
+  if (typeof at !== 'number') return '        '
+  const date = new Date(at)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function format(value: unknown): string {

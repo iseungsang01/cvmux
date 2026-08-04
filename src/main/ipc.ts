@@ -1,6 +1,7 @@
 import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 
 import type { NotificationStore } from '@core/notifications'
+import type { WorkspaceMetaStore } from '@core/workspace-meta'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
@@ -10,6 +11,7 @@ import {
   type BrowserRect,
   type CreateSessionOptions,
   type CvmuxConfig,
+  type TodoItem,
   type Workspace
 } from '@shared/types'
 import type { BrowserManager } from './browser'
@@ -90,11 +92,42 @@ export function registerIpc(
   layout: LayoutStore,
   inbox: NotificationStore,
   config: () => CvmuxConfig,
-  browsers: BrowserManager
+  browsers: BrowserManager,
+  meta: WorkspaceMetaStore
 ): ControlBridge {
   const bridge = new RendererBridge()
 
   ipcMain.handle(IPC.CONFIG, () => config())
+
+  // ── 사이드바 메타데이터 (P25) ────────────────────────────────
+  ipcMain.handle(IPC.WORKSPACE_META, () => meta.all())
+
+  ipcMain.handle(IPC.TODO_ADD, (_event, workspaceId: unknown, text: unknown) => {
+    if (typeof workspaceId !== 'string' || typeof text !== 'string' || !text.trim()) return false
+    try {
+      // 사람이 화면에서 적은 것은 origin이 user다 — 에이전트가 지우지 못하는 근거
+      meta.addTodo(workspaceId, text, 'pending', 'user')
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle(
+    IPC.TODO_SET_STATE,
+    (_event, workspaceId: unknown, ref: unknown, state: unknown) => {
+      if (typeof workspaceId !== 'string' || typeof ref !== 'string') return false
+      const known = ['pending', 'in-progress', 'completed']
+      if (typeof state !== 'string' || !known.includes(state)) return false
+      return meta.setTodoState(workspaceId, ref, state as TodoItem['state']) !== null
+    }
+  )
+
+  ipcMain.handle(IPC.TODO_REMOVE, (_event, workspaceId: unknown, ref: unknown) =>
+    typeof workspaceId === 'string' && typeof ref === 'string'
+      ? meta.removeTodo(workspaceId, ref)
+      : false
+  )
 
   // ── 내장 브라우저 (P23) ──────────────────────────────────────
   ipcMain.handle(IPC.BROWSER_CREATE, (_event, url: unknown) =>

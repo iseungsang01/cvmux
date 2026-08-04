@@ -239,6 +239,21 @@ async function runHooks(args: string[], flags: Map<string, string | true>): Prom
   }
 }
 
+/** 파이프로 흘러들어온 것을 전부 읽는다 — `cvmux todo set`이 쓴다. P25-5 */
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return ''
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  /*
+   * BOM을 걷어낸다.
+   *
+   * PowerShell이 파이프로 넘기는 텍스트에는 UTF-8 BOM이 붙는 일이 흔하고,
+   * `JSON.parse`는 그 한 글자에 막힌다. 사람이 보기에는 멀쩡한 JSON인데
+   * "Unexpected token"이 뜨므로 원인을 짐작하기가 특히 어렵다.
+   */
+  return Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '')
+}
+
 /** `cvmux config …` — 소켓 없이 도는 쪽. P22-6 */
 function runConfig(args: string[], flags: Map<string, string | true>, json: boolean): number {
   const sub = args[0] ?? 'path'
@@ -545,6 +560,108 @@ async function run(
           return client.call(M.BROWSER_SCREENSHOT, target)
         default:
           throw new CliError(`모르는 하위 명령: browser ${sub}`)
+      }
+    }
+
+    /*
+     * ── 사이드바 메타데이터 (P25) ─────────────────────────────
+     *
+     * 대상은 `--workspace`로 고르고, 생략하면 부르는 쪽의 세션이 있는
+     * 워크스페이스다 — 세션 안의 에이전트는 자기 워크스페이스 id를 모른다.
+     */
+    case 'set-status':
+      return client.call(M.STATUS_SET, {
+        workspace,
+        session: defaultSession(flags),
+        name: str(flags, 'name') ?? 'status',
+        text: args.join(' '),
+        color: str(flags, 'color')
+      })
+    case 'clear-status':
+      return client.call(M.STATUS_CLEAR, {
+        workspace,
+        session: defaultSession(flags),
+        name: str(flags, 'name') ?? args[0]
+      })
+    case 'list-status':
+      return client.call(M.STATUS_LIST, { workspace, session: defaultSession(flags) })
+
+    case 'set-progress':
+      return client.call(M.PROGRESS_SET, {
+        workspace,
+        session: defaultSession(flags),
+        value: str(flags, 'value') ?? args[0],
+        text: str(flags, 'text') ?? args.slice(1).join(' ')
+      })
+    case 'clear-progress':
+      return client.call(M.PROGRESS_CLEAR, { workspace, session: defaultSession(flags) })
+
+    case 'log':
+      return client.call(M.LOG_APPEND, {
+        workspace,
+        session: defaultSession(flags),
+        text: args.join(' '),
+        level: str(flags, 'level') ?? 'info'
+      })
+    case 'clear-log':
+      return client.call(M.LOG_CLEAR, { workspace, session: defaultSession(flags) })
+    case 'list-log':
+      return client.call(M.LOG_LIST, {
+        workspace,
+        session: defaultSession(flags),
+        limit: str(flags, 'limit')
+      })
+
+    case 'sidebar-state':
+      return client.call(M.SIDEBAR_STATE, { workspace, session: defaultSession(flags) })
+
+    case 'right-sidebar':
+      return client.call(M.RIGHT_SIDEBAR, {
+        action: args[0] ?? 'toggle',
+        mode: str(flags, 'mode') ?? (args[0] === 'set' ? args[1] : undefined)
+      })
+
+    // ── 체크리스트 (P25-4) ─────────────────────────────────────
+    case 'todo': {
+      const sub = args[0] ?? 'list'
+      const target = { workspace, session: defaultSession(flags) }
+      switch (sub) {
+        case 'add':
+          return client.call(M.TODO_ADD, {
+            ...target,
+            text: args.slice(1).join(' '),
+            state: str(flags, 'state'),
+            origin: str(flags, 'origin')
+          })
+        case 'list':
+          return client.call(M.TODO_LIST, target)
+        case 'check':
+          return client.call(M.TODO_SET_STATE, { ...target, item: args[1], state: 'completed' })
+        case 'uncheck':
+          return client.call(M.TODO_SET_STATE, { ...target, item: args[1], state: 'pending' })
+        case 'start':
+          return client.call(M.TODO_SET_STATE, { ...target, item: args[1], state: 'in-progress' })
+        case 'edit':
+          return client.call(M.TODO_EDIT, { ...target, item: args[1], text: args.slice(2).join(' ') })
+        case 'rm':
+        case 'remove':
+          return client.call(M.TODO_REMOVE, { ...target, item: args[1] })
+        case 'clear':
+          return client.call(M.TODO_CLEAR, target)
+        case 'set': {
+          // 인라인 JSON이거나 stdin으로 흘러들어온 것
+          const inline = args[1]
+          const raw = inline ?? (await readStdin())
+          if (!raw.trim()) throw new CliError('JSON 배열이 필요합니다 (인자 또는 stdin)')
+          const parsed: unknown = JSON.parse(raw)
+          const items = Array.isArray(parsed)
+            ? parsed
+            : (parsed as { items?: unknown }).items
+          if (!Array.isArray(items)) throw new CliError('items는 배열이어야 합니다')
+          return client.call(M.TODO_REPLACE, { ...target, items })
+        }
+        default:
+          throw new CliError(`모르는 하위 명령: todo ${sub}`)
       }
     }
 

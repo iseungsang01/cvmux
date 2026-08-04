@@ -10,10 +10,12 @@ import {
   type CreateSessionResult,
   type CvmuxApi,
   type Notification,
+  type RightSidebarMode,
   type SessionExitInfo,
   type SessionMeta,
   type SessionSnapshot,
-  type Workspace
+  type Workspace,
+  type WorkspaceMeta
 } from '@shared/types'
 
 /**
@@ -56,6 +58,14 @@ const api: CvmuxApi = {
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
   config: () => ipcRenderer.invoke(IPC.CONFIG) as Promise<CvmuxConfig>,
+  workspaceMeta: () =>
+    ipcRenderer.invoke(IPC.WORKSPACE_META) as Promise<Record<string, WorkspaceMeta>>,
+  todoAdd: (workspaceId, text) =>
+    ipcRenderer.invoke(IPC.TODO_ADD, workspaceId, text) as Promise<boolean>,
+  todoSetState: (workspaceId, ref, state) =>
+    ipcRenderer.invoke(IPC.TODO_SET_STATE, workspaceId, ref, state) as Promise<boolean>,
+  todoRemove: (workspaceId, ref) =>
+    ipcRenderer.invoke(IPC.TODO_REMOVE, workspaceId, ref) as Promise<boolean>,
   browserCreate: (url) => ipcRenderer.invoke(IPC.BROWSER_CREATE, url) as Promise<BrowserMeta>,
   browserPlace: (id, rect) => ipcRenderer.invoke(IPC.BROWSER_PLACE, id, rect) as Promise<boolean>,
   browserClose: (id) => ipcRenderer.invoke(IPC.BROWSER_CLOSE, id) as Promise<boolean>,
@@ -78,7 +88,11 @@ const api: CvmuxApi = {
   onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb),
   onNotifications: (cb) => subscribe<[Notification[]]>(IPC.EVT_NOTIFICATIONS, cb),
   onConfig: (cb) => subscribe<[CvmuxConfig]>(IPC.EVT_CONFIG, cb),
-  onBrowser: (cb) => subscribe<[BrowserMeta]>(IPC.EVT_BROWSER, cb)
+  onBrowser: (cb) => subscribe<[BrowserMeta]>(IPC.EVT_BROWSER, cb),
+  onWorkspaceMeta: (cb) =>
+    subscribe<[Record<string, WorkspaceMeta>]>(IPC.EVT_WORKSPACE_META, cb),
+  onRightSidebar: (cb) =>
+    subscribe<[{ open: boolean; mode: RightSidebarMode }]>(IPC.EVT_RIGHT_SIDEBAR, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

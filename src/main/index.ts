@@ -6,6 +6,7 @@ import { BrowserWindow, app, dialog, shell } from 'electron'
 import { AgentSessionStore } from '@core/agent-sessions'
 import { ConfigStore, type ConfigSnapshot } from '@core/config-store'
 import { NotificationStore } from '@core/notifications'
+import { WorkspaceMetaStore } from '@core/workspace-meta'
 import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
 import { POLICY } from '@shared/policy'
@@ -79,6 +80,16 @@ const configStore = new ConfigStore((snapshot) => {
 
 /** 에이전트 대화 기록. 훅이 적고 복원이 읽는다. P22-8 */
 const agentSessions = new AgentSessionStore()
+
+/**
+ * 사이드바 메타데이터 (P25).
+ *
+ * 에이전트가 소켓으로 적고 렌더러가 그린다. 저장하지 않는다 — 진행 중인 일에
+ * 대한 기록이라, 앱을 껐다 켜면 그 일은 이미 끝났거나 처음부터 다시다.
+ */
+const workspaceMeta = new WorkspaceMetaStore(() => {
+  broadcast(IPC.EVT_WORKSPACE_META, workspaceMeta.all())
+})
 
 /**
  * 내장 브라우저 (P23).
@@ -351,12 +362,15 @@ if (!app.requestSingleInstanceLock()) {
         load: () => restoredLayout,
         save: (workspaces) => {
           currentLayout = workspaces
+          // 사라진 워크스페이스의 메타데이터는 함께 치운다. P25
+          workspaceMeta.prune(workspaces.map((w) => w.id))
           schedulePersist()
         }
       },
       inbox,
       () => configStore.current.config,
-      browsers
+      browsers,
+      workspaceMeta
     )
 
     /*
@@ -372,6 +386,8 @@ if (!app.requestSingleInstanceLock()) {
         bridge,
         inbox,
         browsers,
+        meta: workspaceMeta,
+        layout: () => currentLayout,
         showWindow,
         reloadConfig: (): ConfigSnapshot => {
           const snapshot = configStore.reload()
