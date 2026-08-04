@@ -18,6 +18,14 @@ export interface PersistedSession {
   /** 사용자가 직접 지정한 제목만 저장한다. 셸이 설정한 제목은 다시 오면 그만 */
   title: string | null
   scrollback: string
+  /**
+   * 이 세션에서 돌던 에이전트 대화 (P22-8).
+   *
+   * 세션 id는 복원할 때 새로 발급되므로 훅이 적어 둔 기록만으로는 짝을 지을 수
+   * 없다. 그래서 저장 시점에 여기로 옮겨 적는다 — 세션과 대화가 같은 파일에서
+   * 같은 순번으로 되살아난다.
+   */
+  agent?: { name: string; sessionId: string }
 }
 
 /**
@@ -137,7 +145,8 @@ export class SessionStore {
       sessions.push({
         cwd: s.cwd,
         title: typeof s.title === 'string' ? s.title : null,
-        scrollback: typeof s.scrollback === 'string' ? s.scrollback : ''
+        scrollback: typeof s.scrollback === 'string' ? s.scrollback : '',
+        agent: parseAgentLink(s.agent)
       })
     }
 
@@ -160,6 +169,22 @@ export class SessionStore {
       notifications: parseNotifications(state.notifications)
     }
   }
+}
+
+/**
+ * 저장된 에이전트 연결 (P22-8).
+ *
+ * 이름과 id에 셸이 해석할 만한 글자가 섞이면 걸러낸다. 이 값은 나중에 셸
+ * 명령줄에 그대로 실리므로, 파일을 손으로 고친 사람이 자기도 모르게 명령을
+ * 심는 자리가 되어서는 안 된다.
+ */
+function parseAgentLink(value: unknown): { name: string; sessionId: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const link = value as { name?: unknown; sessionId?: unknown }
+  if (typeof link.name !== 'string' || typeof link.sessionId !== 'string') return undefined
+  if (!/^[a-z0-9-]{1,32}$/i.test(link.name)) return undefined
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(link.sessionId)) return undefined
+  return { name: link.name, sessionId: link.sessionId }
 }
 
 function parseNotifications(value: unknown): Notification[] {

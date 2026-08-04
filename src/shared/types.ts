@@ -1,6 +1,9 @@
 /**
  * main ↔ renderer 사이의 계약. 양쪽 모두 이 파일만 신뢰한다.
  */
+import type { CvmuxConfig } from './config'
+
+export type { CvmuxConfig }
 
 /**
  * 세션 상태. 판정 신호의 확실성 순서는 POLICY.md P4 참조.
@@ -162,6 +165,8 @@ export const IPC = {
   SAVE_LAYOUT: 'layout:save',
   /** 제어 소켓 요청에 대한 렌더러의 답. P20-7 */
   CTL_REPLY: 'ctl:reply',
+  /** 설정. P22 */
+  CONFIG: 'config:get',
   /** 알림함. P21 */
   NOTIFICATIONS: 'notify:list',
   NOTIFICATION_READ: 'notify:read',
@@ -180,7 +185,9 @@ export const IPC = {
   /** 제어 소켓이 렌더러에게 묻는다 (워크스페이스·pane·알림). P20-7 */
   EVT_CTL_REQUEST: 'evt:control-request',
   /** 알림함이 바뀌었다. P21 */
-  EVT_NOTIFICATIONS: 'evt:notifications'
+  EVT_NOTIFICATIONS: 'evt:notifications',
+  /** 설정 파일이 바뀌었다. P22-4 */
+  EVT_CONFIG: 'evt:config'
 } as const
 
 /** 렌더러가 답해야 하는 제어 요청. P20-7 */
@@ -227,6 +234,9 @@ export interface CvmuxApi {
   /** 제어 소켓 요청에 답한다. 오류면 ok=false에 사유 문자열. P20-7 */
   controlReply(id: number, ok: boolean, payload: unknown): Promise<boolean>
 
+  /** 지금 적용된 설정. P22 */
+  config(): Promise<CvmuxConfig>
+
   /** 알림함. P21 */
   notifications(): Promise<Notification[]>
   notificationRead(id: string): Promise<boolean>
@@ -243,4 +253,5 @@ export interface CvmuxApi {
   onActivate(cb: (id: string) => void): () => void
   onControlRequest(cb: (ask: ControlAsk) => void): () => void
   onNotifications(cb: (items: Notification[]) => void): () => void
+  onConfig(cb: (config: CvmuxConfig) => void): () => void
 }

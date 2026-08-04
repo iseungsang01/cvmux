@@ -17,6 +17,8 @@ import type {
 } from '@shared/types'
 import { ProbeScheduler, gitInfoEqual, portsEqual, shellsEqual } from './probe-scheduler'
 import { SessionState } from './session-state'
+import type { CvmuxConfig } from '@shared/config'
+import { resumeCommand } from './agent-sessions'
 import { trimScrollback, type PersistedSession } from './store'
 
 /**
@@ -26,7 +28,7 @@ import { trimScrollback, type PersistedSession } from './store'
  * 건드리지 않고 세션 한정으로 인코딩만 바꾼다. 인용 지옥을 피하려고
  * -EncodedCommand(UTF-16LE Base64)로 넘긴다.
  */
-function psBootstrap(keepScreen: boolean): string {
+function psBootstrap(keepScreen: boolean, resume: string | null): string {
   const parts = [
     '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
@@ -35,6 +37,18 @@ function psBootstrap(keepScreen: boolean): string {
   if (process.env.CVMUX_NO_SHELL_INTEGRATION !== '1') parts.push(SHELL_INTEGRATION)
   // 복원된 세션에서는 화면을 지우지 않는다 — 지우면 복원한 스크롤백이 날아간다. P16-6
   if (!keepScreen) parts.push('Clear-Host')
+
+  /*
+   * 에이전트 이어서 띄우기 (P22-8).
+   *
+   * 부트스트랩 끝에 붙인다. 셸 통합이 이미 걸린 뒤이고 대화형 REPL이 시작되기
+   * 전이라, 사용자가 직접 친 것과 같은 자리에서 돈다. 에이전트를 끝내면
+   * `-NoExit` 덕분에 그냥 셸로 남는다 — 세션이 사라지지 않는다.
+   */
+  if (resume) {
+    parts.push(`Write-Host "── 이어서 띄웁니다: ${resume} ──" -ForegroundColor DarkGray`)
+    parts.push(resume)
+  }
   return parts.join('\n')
 }
 
@@ -129,14 +143,14 @@ function resolveShell(preferred?: string): string | null {
   return null
 }
 
-function shellArgs(shell: string, keepScreen: boolean): string[] {
+function shellArgs(shell: string, keepScreen: boolean, resume: string | null): string[] {
   const name = basename(shell).toLowerCase()
   if (name === 'pwsh.exe' || name === 'powershell.exe') {
     return [
       '-NoLogo',
       '-NoExit',
       '-EncodedCommand',
-      encodePowerShellCommand(psBootstrap(keepScreen))
+      encodePowerShellCommand(psBootstrap(keepScreen, resume))
     ]
   }
   return []
@@ -233,6 +247,13 @@ class Session {
      * 읽으므로, 소켓이 세션보다 늦게 열려도 재시작한 세션은 주소를 받는다.
      */
     private readonly sessionEnv: Record<string, string>,
+    /**
+     * 복원할 때 셸 시작과 함께 띄울 명령 (P22-8).
+     *
+     * 에이전트를 이어서 띄우는 데만 쓴다. **한 번만** 쓴다 — 재시작(P1-4)은
+     * 사용자가 셸을 원한 것이지 대화를 되살려 달라는 뜻이 아니다.
+     */
+    private resume: string | null,
     private readonly emit: {
       data(id: string, chunk: string): void
       meta(id: string): void
@@ -291,7 +312,7 @@ class Session {
     this.shell = shell
 
     try {
-      const proc = pty.spawn(shell, shellArgs(shell, this.restored), {
+      const proc = pty.spawn(shell, shellArgs(shell, this.restored, this.resume), {
         name: 'xterm-256color',
         cols: this.cols,
         rows: this.rows,
@@ -302,6 +323,8 @@ class Session {
 
       this.proc = proc
       this.startedAt = Date.now()
+      // 이어서 띄우기는 복원할 때 한 번뿐이다. P22-8
+      this.resume = null
       // 셸이 뜨는 동안 오는 클리어만 막는다. 그 뒤의 Clear-Host는 사용자 의도다. P16-6
       if (this.restored) this.stripClearUntil = this.startedAt + 1500
 
@@ -581,6 +604,10 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   private readonly defaultCwd: string
   /** 모든 세션이 공유하는 추가 환경변수. 소켓이 열리면 여기에 주소가 들어온다. P20-3 */
   private readonly sessionEnv: Record<string, string> = {}
+  /** 설정이 정한 셸. 비어 있으면 pwsh → powershell → cmd 순으로 찾는다. P22-2 */
+  private defaultShell: string | undefined
+  /** 복원할 때 에이전트를 이어서 띄울 것인가. P22-8 */
+  private autoResume = true
 
   constructor(options: PtyManagerOptions = {}) {
     super()
@@ -595,6 +622,17 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
    */
   setSessionEnv(env: Record<string, string>): void {
     Object.assign(this.sessionEnv, env)
+  }
+
+  /**
+   * 설정에서 오는 값을 반영한다 (P22-2).
+   *
+   * 셸은 **다음에 만드는 세션부터** 바뀐다. 이미 도는 셸을 갈아 끼울 수는
+   * 없고, 그러려 드는 것은 사용자가 원한 일도 아니다.
+   */
+  setDefaults(config: CvmuxConfig): void {
+    this.defaultShell = config.terminal.shell ?? undefined
+    this.autoResume = config.terminal.autoResumeAgentSessions
   }
 
   /** git·포트 정보를 주기적으로 채운다. P13 / P14 */
@@ -635,7 +673,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   private spawn(
     options: CreateSessionOptions,
-    restoredScrollback: string | null
+    restoredScrollback: string | null,
+    resume: string | null = null
   ): CreateSessionResult {
     // 상한 초과는 예외가 아니라 사유가 담긴 실패다. P1-8 / P8-3 / P12
     if (this.sessions.size >= POLICY.MAX_SESSIONS) {
@@ -645,19 +684,26 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       }
     }
 
-    const session = new Session(options, this.defaultCwd, restoredScrollback, this.sessionEnv, {
-      data: (id, chunk) => this.emit('data', id, chunk),
-      meta: (id) => {
-        const s = this.sessions.get(id)
-        if (s) this.emit('meta', s.toMeta())
-      },
-      exit: (info) => this.emit('exit', info),
-      notify: (id, text) => this.emit('notify', id, text),
-      cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd)
-    })
+    const session = new Session(
+      options,
+      this.defaultCwd,
+      restoredScrollback,
+      this.sessionEnv,
+      resume,
+      {
+        data: (id, chunk) => this.emit('data', id, chunk),
+        meta: (id) => {
+          const s = this.sessions.get(id)
+          if (s) this.emit('meta', s.toMeta())
+        },
+        exit: (info) => this.emit('exit', info),
+        notify: (id, text) => this.emit('notify', id, text),
+        cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd)
+      }
+    )
 
     this.sessions.set(session.id, session)
-    session.start()
+    session.start(this.defaultShell)
     // 세션이 없는 동안 프로브는 자고 있다. P14-6
     this.probes.wake()
 
@@ -702,10 +748,30 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     return sessions.map((item) => {
       // 상한을 넘으면 조용히 멈춘다. P16-7
       if (this.sessions.size >= POLICY.MAX_SESSIONS) return null
+
+      /*
+       * 에이전트를 이어서 띄운다 (P22-8).
+       *
+       * 명령은 우리가 아는 에이전트 표에서만 만든다. 저장 파일에 적힌 문자열을
+       * 그대로 실행하지 않는다 — 파일을 손으로 고친 사람이 자기도 모르게
+       * 명령을 심는 자리가 되면 안 된다.
+       */
+      const resume =
+        this.autoResume && item.agent
+          ? resumeCommand({
+              sessionId: '',
+              agent: item.agent.name,
+              agentSessionId: item.agent.sessionId,
+              cwd: item.cwd,
+              updatedAt: 0
+            })
+          : null
+
       // 사라진 디렉토리는 resolveCwd가 폴백하고 경고를 남긴다. P16-4
       const result = this.spawn(
         { cwd: item.cwd, title: item.title ?? undefined },
-        item.scrollback || null
+        item.scrollback || null,
+        resume
       )
       return result.ok && result.session ? result.session.id : null
     })

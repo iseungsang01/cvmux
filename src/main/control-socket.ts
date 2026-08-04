@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 
+import type { ConfigSnapshot } from '@core/config-store'
 import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
 import {
@@ -39,6 +40,8 @@ export interface ControlHost {
   inbox: NotificationStore
   /** 창을 앞으로 가져온다 — `cvmux open`과 `app.focus`가 쓴다 */
   showWindow(): void
+  /** 설정 파일을 다시 읽는다. P22-6 */
+  reloadConfig(): ConfigSnapshot
   version: string
 }
 
@@ -393,6 +396,15 @@ export class ControlSocketServer {
       case M.APP_FOCUS:
         this.host.showWindow()
         return { focused: true }
+
+      // 설정 다시 읽기 (P22-6). 파일 감시가 놓쳤을 때의 손잡이다
+      case M.CONFIG_RELOAD: {
+        const snapshot = this.host.reloadConfig()
+        return {
+          source: snapshot.source,
+          problems: snapshot.problems.map((p) => ({ path: p.path, message: p.message }))
+        }
+      }
 
       case M.EVENTS_STREAM:
         this.startStream(client, params, id)

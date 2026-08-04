@@ -1,6 +1,19 @@
+import { existsSync, readFileSync } from 'node:fs'
+
+import { ConfigStore, configPaths } from '@core/config-store'
+import { parseConfig, parseJsonc } from '@shared/config'
 import { M } from '@shared/protocol'
 import { CliError, ControlClient, resolveEndpoint } from './client'
 import { HELP, VERSION, commandHelp } from './help'
+import {
+  hookNotifyText,
+  hooksStatus,
+  installClaude,
+  readHookPayload,
+  recordSession,
+  resumableAgents,
+  uninstallClaude
+} from './hooks'
 import { render } from './render'
 
 /**
@@ -116,6 +129,15 @@ async function main(argv: string[]): Promise<number> {
     return help.startsWith('Usage:') ? 0 : 1
   }
 
+  /*
+   * 훅과 설정은 소켓 없이 답한다 (P20-1 / P22-6).
+   *
+   * `cvmux hooks record`는 에이전트가 부르는 명령이라 앱이 떠 있지 않을 수도
+   * 있고, `cvmux config doctor`는 애초에 앱이 뜨지 않을 때 쓰는 것이다.
+   */
+  if (command === 'hooks') return runHooks(args, flags)
+  if (command === 'config' && args[0] !== 'reload') return runConfig(args, flags, json)
+
   const endpoint = resolveEndpoint({ socket: str(flags, 'socket'), password: str(flags, 'password') })
   const client = new ControlClient(endpoint)
   await client.connect()
@@ -128,6 +150,157 @@ async function main(argv: string[]): Promise<number> {
     // 이벤트 스트림은 스스로 끝난다 — 그 외에는 여기서 닫는다
     if (command !== 'events') client.close()
   }
+}
+
+/**
+ * `cvmux hooks …` (P22-7).
+ *
+ * `record`와 `notify`는 에이전트가 부르는 것이라 **절대 실패로 끝나지 않는다** —
+ * 훅이 0이 아닌 코드로 끝나면 에이전트가 그것을 오류로 다룬다. 할 수 없는
+ * 상황이면 이유만 적고 0으로 나간다.
+ */
+async function runHooks(args: string[], flags: Map<string, string | true>): Promise<number> {
+  const sub = args[0] ?? 'status'
+  const agent = str(flags, 'agent') ?? args[1] ?? 'claude'
+
+  switch (sub) {
+    case 'setup':
+    case 'install': {
+      if (agent !== 'claude') {
+        process.stderr.write(
+          `cvmux: ${agent}는 자동 설치를 지원하지 않습니다.\n` +
+            '훅 형식을 확인 없이 짐작해 쓰면 남의 설정을 망가뜨립니다.\n' +
+            `대신 그 에이전트의 훅에 이 한 줄을 직접 걸면 같은 것이 동작합니다:\n` +
+            `  cvmux hooks record --agent ${agent}\n`
+        )
+        return 1
+      }
+      const result = installClaude()
+      process.stdout.write(
+        `claude 훅을 설치했습니다 → ${result.file}\n` +
+          `이어서 띄우기를 지원하는 에이전트: ${resumableAgents()}\n`
+      )
+      return 0
+    }
+
+    case 'uninstall': {
+      if (agent !== 'claude') {
+        process.stderr.write(`cvmux: ${agent}는 자동 설치를 지원하지 않습니다.\n`)
+        return 1
+      }
+      const result = uninstallClaude()
+      process.stdout.write(
+        result.action === 'removed'
+          ? `claude 훅을 제거했습니다 → ${result.file}\n`
+          : `제거할 훅이 없습니다 (${result.note ?? ''}).\n`
+      )
+      return 0
+    }
+
+    case 'status':
+    case 'list':
+      process.stdout.write(`${hooksStatus()}\n`)
+      return 0
+
+    case 'record': {
+      const payload = await readHookPayload()
+      process.stdout.write(`${recordSession(agent, payload)}\n`)
+      return 0
+    }
+
+    case 'notify': {
+      const payload = await readHookPayload()
+      const text = hookNotifyText(payload, flags.get('stop') === true)
+      // 세션 id도 함께 갱신한다 — 알림 훅이 SessionStart보다 먼저 올 수 있다
+      recordSession(agent, payload)
+
+      try {
+        const endpoint = resolveEndpoint({})
+        const client = new ControlClient(endpoint)
+        await client.connect()
+        await client.call(M.SESSION_NOTIFY, {
+          session: process.env.CVMUX_SESSION_ID,
+          title: agent === 'claude' ? 'Claude Code' : agent,
+          text
+        })
+        client.close()
+      } catch (error) {
+        // 앱이 꺼져 있으면 알릴 곳이 없다. 그래도 에이전트를 멈추지는 않는다
+        process.stderr.write(
+          `cvmux: 알림을 보내지 못했습니다 (${error instanceof Error ? error.message : String(error)})\n`
+        )
+      }
+      return 0
+    }
+
+    default:
+      process.stderr.write(`cvmux: 모르는 하위 명령: hooks ${sub}\n`)
+      return 1
+  }
+}
+
+/** `cvmux config …` — 소켓 없이 도는 쪽. P22-6 */
+function runConfig(args: string[], flags: Map<string, string | true>, json: boolean): number {
+  const sub = args[0] ?? 'path'
+
+  if (sub === 'path' || sub === 'paths') {
+    const [primary, alternate] = configPaths()
+    process.stdout.write(
+      `설정 파일 (앞의 것이 먼저 읽힙니다):\n  ${primary}\n  ${alternate}\n\n` +
+        '없으면 `cvmux config init`으로 주석이 달린 본보기를 만들 수 있습니다.\n' +
+        '고친 뒤에는 저장만 하면 바로 반영됩니다 (`cvmux config reload`로도 됩니다).\n'
+    )
+    return 0
+  }
+
+  if (sub === 'init') {
+    // 앱이 하는 일과 같은 것을 CLI에서도 할 수 있게 한다
+    const store = new ConfigStore(() => {})
+    const path = store.ensureFile()
+    process.stdout.write(`${path}\n`)
+    return 0
+  }
+
+  if (sub === 'doctor' || sub === 'check' || sub === 'validate') {
+    const explicit = str(flags, 'path')
+    const candidates = explicit ? [explicit] : configPaths()
+    const findings: Array<{ path: string; ok: boolean; problems: string[] }> = []
+
+    for (const path of candidates) {
+      if (!existsSync(path)) {
+        findings.push({ path, ok: true, problems: ['(파일 없음 — 기본값을 씁니다)'] })
+        continue
+      }
+      try {
+        const { problems } = parseConfig(parseJsonc(readFileSync(path, 'utf8')))
+        findings.push({
+          path,
+          ok: problems.length === 0,
+          problems: problems.map((p) => `${p.path || '(최상위)'}: ${p.message}`)
+        })
+      } catch (error) {
+        findings.push({
+          path,
+          ok: false,
+          problems: [error instanceof Error ? error.message : String(error)]
+        })
+      }
+    }
+
+    const bad = findings.filter((f) => !f.ok)
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: bad.length === 0, findings }, null, 2)}\n`)
+    } else {
+      for (const finding of findings) {
+        process.stdout.write(`${finding.ok ? 'OK  ' : 'ERR '}${finding.path}\n`)
+        for (const problem of finding.problems) process.stdout.write(`      ${problem}\n`)
+      }
+    }
+    return bad.length === 0 ? 0 : 1
+  }
+
+  process.stderr.write(`cvmux: 모르는 하위 명령: config ${sub}\n`)
+  return 1
 }
 
 async function run(
@@ -272,6 +445,10 @@ async function run(
       return client.call(M.NOTIFICATION_OPEN, { session: args[0] ?? defaultSession(flags) })
     case 'jump-to-unread':
       return client.call(M.NOTIFICATION_JUMP_UNREAD)
+
+    // config의 나머지는 소켓 없이 처리했다. reload만 앱에 닿아야 한다. P22-6
+    case 'config':
+      return client.call(M.CONFIG_RELOAD)
 
     case 'panel':
       return client.call(M.APP_PANEL, {

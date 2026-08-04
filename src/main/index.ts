@@ -3,6 +3,8 @@ import { homedir, release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 
+import { AgentSessionStore } from '@core/agent-sessions'
+import { ConfigStore, type ConfigSnapshot } from '@core/config-store'
 import { NotificationStore } from '@core/notifications'
 import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
@@ -57,20 +59,53 @@ let currentLayout: Workspace[] = []
  */
 const inbox = new NotificationStore(() => {
   const items = inbox.list()
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed() || win.webContents.isDestroyed()) continue
-    win.webContents.send(IPC.EVT_NOTIFICATIONS, items)
-  }
+  broadcast(IPC.EVT_NOTIFICATIONS, items)
   schedulePersist()
 })
+
+/**
+ * 설정 (P22).
+ *
+ * 파일이 바뀌면 렌더러에 통째로 내려보낸다. 셸처럼 세션을 만들 때만 쓰이는
+ * 값은 다음 세션부터 적용되고, 폰트·색·단축키는 그 자리에서 바뀐다(P22-4).
+ */
+const configStore = new ConfigStore((snapshot) => {
+  broadcast(IPC.EVT_CONFIG, snapshot.config)
+  for (const problem of snapshot.problems) {
+    console.warn(`[cvmux] 설정 ${problem.path || '(최상위)'}: ${problem.message}`)
+  }
+})
+
+/** 에이전트 대화 기록. 훅이 적고 복원이 읽는다. P22-8 */
+const agentSessions = new AgentSessionStore()
+
+function broadcast(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue
+    win.webContents.send(channel, ...args)
+  }
+}
 
 /** 지금 즉시 저장. P16-1 / P17 / P21-8 */
 function persistNow(): void {
   if (!store) return
+  /*
+   * 에이전트 대화를 세션에 붙여 저장한다 (P22-8).
+   *
+   * 세션 id는 복원 때 새로 발급되므로, 훅이 적어 둔 기록을 지금 세션 순서에
+   * 맞춰 옮겨 적어야 다음에 짝을 지을 수 있다.
+   */
+  const order = manager.sessionOrder()
+  const sessions = manager.serialize().map((session, i) => {
+    const record = agentSessions.find(order[i])
+    return record ? { ...session, agent: { name: record.agent, sessionId: record.agentSessionId } } : session
+  })
+  agentSessions.prune(order)
+
   store.save({
     version: 3,
     savedAt: Date.now(),
-    sessions: manager.serialize(),
+    sessions,
     // 세션을 순번으로 가리키므로 serialize()와 같은 순서를 넘겨야 한다
     workspaces: workspacesToPersisted(currentLayout, manager.sessionOrder()),
     notifications: inbox.serialize()
@@ -278,6 +313,20 @@ if (!app.requestSingleInstanceLock()) {
     // 이걸 설정하지 않으면 Windows가 토스트를 조용히 무시한다. P15-8
     app.setAppUserModelId('com.cvmux.app')
 
+    /*
+     * 설정을 가장 먼저 읽는다 (P22).
+     *
+     * 셸과 스크롤백 같은 값은 세션을 만들 때 필요하고, 세션 복원은 곧
+     * 뒤따른다. 설정 파일이 없으면 주석이 달린 본보기를 만들어 둔다 —
+     * 빈 파일을 주면 무엇을 쓸 수 있는지 알 길이 없다(P22-1).
+     */
+    configStore.load()
+    configStore.ensureFile()
+    configStore.watchFiles()
+    manager.setDefaults(configStore.current.config)
+
+    agentSessions.load()
+
     store = new SessionStore(join(app.getPath('userData'), 'sessions.json'))
     const saved = store.load()
     // 알림함은 세션보다 먼저 되살린다 — 복원한 세션의 알림이 이미 자리에 있어야 한다
@@ -293,7 +342,8 @@ if (!app.requestSingleInstanceLock()) {
           schedulePersist()
         }
       },
-      inbox
+      inbox,
+      () => configStore.current.config
     )
 
     /*
@@ -309,6 +359,11 @@ if (!app.requestSingleInstanceLock()) {
         bridge,
         inbox,
         showWindow,
+        reloadConfig: (): ConfigSnapshot => {
+          const snapshot = configStore.reload()
+          manager.setDefaults(snapshot.config)
+          return snapshot
+        },
         version: app.getVersion()
       },
       pipePathFor(userData),

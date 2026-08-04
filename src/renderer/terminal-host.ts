@@ -2,8 +2,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 
+import { DEFAULT_CONFIG, type CvmuxConfig } from '@shared/config'
 import { POLICY } from '@shared/policy'
 import type { ClipboardContent, SessionStatus } from '@shared/types'
 
@@ -33,28 +34,37 @@ const MAX_CONTEXT_LOSSES = 2
  * 그래서 인스턴스는 세션이 닫힐 때까지 살려두고, 화면에서는 CSS로만 감춘다.
  */
 
-const THEME = {
-  background: '#0d1016',
-  foreground: '#d3d9e3',
-  cursor: '#7aa2f7',
-  cursorAccent: '#0d1016',
-  selectionBackground: '#2b3a5c',
-  black: '#171b23',
-  red: '#f7768e',
-  green: '#9ece6a',
-  yellow: '#e0af68',
-  blue: '#7aa2f7',
-  magenta: '#bb9af7',
-  cyan: '#7dcfff',
-  white: '#a9b1d6',
-  brightBlack: '#4a5570',
-  brightRed: '#ff8ea1',
-  brightGreen: '#b9f27c',
-  brightYellow: '#ffc777',
-  brightBlue: '#8fb4ff',
-  brightMagenta: '#cba6f7',
-  brightCyan: '#9ae0ff',
-  brightWhite: '#e6ebf4'
+/**
+ * 설정의 색을 xterm 테마로 (P22-2).
+ *
+ * 이름이 다른 것은 두 개뿐이다 — 선택 영역과 커서 강조. 커서 위 글자는
+ * 배경색으로 그려야 커서 안에서도 글자가 보인다.
+ */
+function themeOf(config: CvmuxConfig): ITheme {
+  const t = config.theme
+  return {
+    background: t.background,
+    foreground: t.foreground,
+    cursor: t.cursor,
+    cursorAccent: t.background,
+    selectionBackground: t.selection,
+    black: t.black,
+    red: t.red,
+    green: t.green,
+    yellow: t.yellow,
+    blue: t.blue,
+    magenta: t.magenta,
+    cyan: t.cyan,
+    white: t.white,
+    brightBlack: t.brightBlack,
+    brightRed: t.brightRed,
+    brightGreen: t.brightGreen,
+    brightYellow: t.brightYellow,
+    brightBlue: t.brightBlue,
+    brightMagenta: t.brightMagenta,
+    brightCyan: t.brightCyan,
+    brightWhite: t.brightWhite
+  }
 }
 
 export interface TerminalHostCallbacks {
@@ -92,9 +102,32 @@ interface Entry {
 export class TerminalHost {
   private readonly entries = new Map<string, Entry>()
   private dpr = window.devicePixelRatio
+  /** 설정에서 온 값. 새로 만드는 터미널이 이걸 물려받는다. P22-2 */
+  private config: CvmuxConfig = DEFAULT_CONFIG
 
   constructor(private readonly callbacks: TerminalHostCallbacks) {
     this.watchDevicePixelRatio()
+  }
+
+  /**
+   * 설정을 적용한다 (P22-4).
+   *
+   * 이미 열려 있는 터미널에도 그 자리에서 먹인다 — 폰트를 고치고 앱을 다시
+   * 켜야 보인다면 설정 파일을 편집할 이유가 없다. 크기가 바뀌므로 다시 맞춘다.
+   */
+  applyConfig(config: CvmuxConfig): void {
+    this.config = config
+    for (const entry of this.entries.values()) {
+      const term = entry.term
+      term.options.fontFamily = config.terminal.fontFamily
+      term.options.fontSize = config.terminal.fontSize
+      term.options.lineHeight = config.terminal.lineHeight
+      term.options.cursorStyle = config.terminal.cursorStyle
+      term.options.cursorBlink = config.terminal.cursorBlink
+      term.options.scrollback = config.terminal.scrollback
+      term.options.theme = themeOf(config)
+      this.scheduleFit(entry)
+    }
   }
 
   has(id: string): boolean {
@@ -293,18 +326,19 @@ export class TerminalHost {
     if (existing) return existing
 
     const term = new Terminal({
-      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "D2Coding", monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
+      fontFamily: this.config.terminal.fontFamily,
+      fontSize: this.config.terminal.fontSize,
+      lineHeight: this.config.terminal.lineHeight,
       letterSpacing: 0,
-      scrollback: POLICY.SCROLLBACK_LINES, // P3-6 / P8-1
-      cursorBlink: true,
-      cursorStyle: 'bar',
+      // 기본값은 POLICY.SCROLLBACK_LINES와 같다. 설정이 바꿀 수 있다. P3-6 / P8-1 / P22-2
+      scrollback: this.config.terminal.scrollback,
+      cursorBlink: this.config.terminal.cursorBlink,
+      cursorStyle: this.config.terminal.cursorStyle,
       // drawBoldTextInBrightColors는 기본값(true)을 쓴다. 끄면 chalk/ink 기반 CLI가
       // 볼드+색으로 표현하는 강조가 어두운 원색으로 렌더링돼 화면이 칙칙해진다.
       allowProposedApi: true,
       macOptionIsMeta: false,
-      theme: THEME
+      theme: themeOf(this.config)
     })
 
     const fit = new FitAddon()

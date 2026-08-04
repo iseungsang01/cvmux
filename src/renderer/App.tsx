@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 
+import { DEFAULT_CONFIG, type CvmuxConfig } from '@shared/config'
+import { actionFor, compileBindings, formatChord, type Chord } from '@shared/keys'
 import type { Notification, SessionMeta, Workspace } from '@shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { FindBar, type FindHit } from './components/FindBar'
@@ -21,83 +23,15 @@ import { focusedSessionId, makeWorkspace, reorder, sessionIdOfPane } from './lib
 import { TerminalHost } from './terminal-host'
 
 /**
- * 앱 단축키 (P6-3 / P17-1).
+ * 앱 단축키 (P6-3 / P17-1 / P22-5).
  *
- * 셸이 실제로 쓰는 키는 절대 가로채지 않는다. Ctrl+C는 인터럽트(P6-1),
- * Ctrl+N/Ctrl+B/Ctrl+W/Ctrl+D는 PSReadLine과 bash가 쓰므로 전부 Shift를 얹었다.
+ * 조합은 설정 파일이 정한다. 기본값은 전부 `Shift`나 `Alt`가 붙어 있는데,
+ * `Ctrl+C`·`Ctrl+N`·`Ctrl+P`·`Ctrl+F`·`Ctrl+I`는 PSReadLine과 bash가 쓰는
+ * 키라 앱이 가로채면 안 되기 때문이다(P6-1). 바꾸는 것은 사용자의 몫이다.
+ *
+ * 동작 이름은 명령 팔레트의 항목 id와 같다 — 단축키와 팔레트가 같은 동작을
+ * 가리키므로, 표를 둘로 나누면 언젠가 한쪽만 손보게 된다.
  */
-type Shortcut =
-  | { kind: 'new' }
-  | { kind: 'close' }
-  | { kind: 'sidebar' }
-  | { kind: 'rename' }
-  | { kind: 'split'; direction: 'row' | 'column' }
-  | { kind: 'select'; index: number }
-  | { kind: 'palette' }
-  | { kind: 'notifications' }
-  | { kind: 'jump-unread' }
-  | { kind: 'find'; scope: 'session' | 'all' }
-
-function matchShortcut(event: KeyboardEvent): Shortcut | null {
-  if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
-    switch (event.code) {
-      case 'KeyN':
-        return { kind: 'new' }
-      case 'KeyW':
-        return { kind: 'close' }
-      case 'KeyB':
-        return { kind: 'sidebar' }
-      /*
-       * 이름 바꾸기 (P19-3).
-       *
-       * Windows 관례인 F2가 아니라 Ctrl+Shift+E를 쓴다. PSReadLine이 F2를
-       * 예측 뷰 전환에 쓰고 있고, 셸이 실제로 쓰는 키는 가로채지 않는다(P6-1).
-       */
-      case 'KeyE':
-        return { kind: 'rename' }
-      /*
-       * 팔레트·알림·찾기 (P21).
-       *
-       * cmux는 ⌘P · ⌘I · ⌘⇧U · ⌘F를 쓰지만 여기서는 전부 Shift를 얹는다.
-       * Ctrl+P는 PSReadLine의 이전 기록, Ctrl+F는 한 글자 앞으로, Ctrl+I는
-       * 탭 완성이다 — 셸이 쓰는 키는 가로채지 않는다(P6-1).
-       */
-      case 'KeyP':
-        return { kind: 'palette' }
-      case 'KeyI':
-        return { kind: 'notifications' }
-      case 'KeyU':
-        return { kind: 'jump-unread' }
-      case 'KeyF':
-        return { kind: 'find', scope: 'all' }
-      default:
-        return null
-    }
-  }
-
-  // Ctrl+F 단독은 PSReadLine의 것이라 쓸 수 없다. 찾기는 Alt+F로 연다
-  if (event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey) {
-    if (event.code === 'KeyF') return { kind: 'find', scope: 'session' }
-  }
-
-  // 분할은 Windows Terminal 관례를 따른다 — 이 앱을 쓸 사람이 이미 익힌 키다. P17-1
-  if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-    if (event.code === 'Equal' || event.code === 'NumpadAdd') {
-      return { kind: 'split', direction: 'row' } // 오른쪽에 새 pane
-    }
-    if (event.code === 'Minus' || event.code === 'NumpadSubtract') {
-      return { kind: 'split', direction: 'column' } // 아래에 새 pane
-    }
-    return null
-  }
-
-  if (event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey) {
-    // e.key 대신 e.code — 키보드 레이아웃이 달라도 숫자열 위치는 같다
-    const match = /^Digit([1-8])$/.exec(event.code)
-    if (match) return { kind: 'select', index: Number.parseInt(match[1], 10) - 1 }
-  }
-  return null
-}
 
 export function App(): JSX.Element {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
@@ -112,6 +46,7 @@ export function App(): JSX.Element {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [inboxOpen, setInboxOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [config, setConfig] = useState<CvmuxConfig>(DEFAULT_CONFIG)
   const [find, setFind] = useState<{
     open: boolean
     query: string
@@ -127,15 +62,14 @@ export function App(): JSX.Element {
   const composingRef = useRef(false)
 
   /**
-   * 알림·찾기 동작 (P21).
+   * 동작 실행기 (P22-5).
    *
-   * 단축키 처리기는 이 함수들보다 위에 있다 — 그쪽이 먼저 세션과 pane을
+   * 단축키 처리기는 이 아래 함수들보다 위에 있다 — 그쪽이 먼저 세션과 pane을
    * 다루기 때문이다. 최신 값을 ref로 건네는 것은 이 파일이 이미 쓰는 방식이다.
    */
-  const overlaysRef = useRef({
-    jumpToUnread: (): void => {},
-    openFind: (_scope: 'session' | 'all'): void => {}
-  })
+  const runActionRef = useRef((_action: string): void => {})
+  /** 지금 유효한 단축키 표. 설정이 바뀌면 그 자리에서 갈린다 */
+  const bindingsRef = useRef(compileBindings(DEFAULT_CONFIG.keybindings))
 
   activeIdRef.current = activeId
   workspacesRef.current = workspaces
@@ -160,7 +94,7 @@ export function App(): JSX.Element {
         onRestartRequest: (id) => {
           void window.cvmux.restart(id)
         },
-        isAppShortcut: (event) => matchShortcut(event) !== null
+        isAppShortcut: (event) => actionFor(bindingsRef.current, event) !== null
       }),
     []
   )
@@ -407,51 +341,12 @@ export function App(): JSX.Element {
       // 한글 조합 중에는 앱 단축키를 처리하지 않는다. P6-4
       if (composingRef.current || event.isComposing) return
 
-      const shortcut = matchShortcut(event)
-      if (!shortcut) return
+      const action = actionFor(bindingsRef.current, event)
+      if (action === null) return
 
       event.preventDefault()
       event.stopPropagation()
-
-      switch (shortcut.kind) {
-        case 'new':
-          void createWorkspace().catch(() => undefined)
-          break
-        case 'close':
-          closeFocusedPane()
-          break
-        case 'sidebar':
-          setSidebarCollapsed((v) => !v)
-          break
-        case 'rename':
-          // 사이드바가 접혀 있으면 편집할 줄이 보이지 않는다 — 먼저 펼친다
-          setSidebarCollapsed(false)
-          setRenamingId(activeIdRef.current)
-          break
-        case 'split':
-          void splitFocused(shortcut.direction)
-          break
-        case 'select': {
-          const target = workspacesRef.current[shortcut.index]
-          if (target) setActiveId(target.id)
-          break
-        }
-        case 'palette':
-          // 겹쳐 뜨는 것을 막는다 — 팔레트를 열면 나머지는 물러난다
-          setInboxOpen(false)
-          setPaletteOpen((v) => !v)
-          break
-        case 'notifications':
-          setPaletteOpen(false)
-          setInboxOpen((v) => !v)
-          break
-        case 'jump-unread':
-          overlaysRef.current.jumpToUnread()
-          break
-        case 'find':
-          overlaysRef.current.openFind(shortcut.scope)
-          break
-      }
+      runActionRef.current(action)
     }
 
     // capture 단계에서 잡아야 xterm의 textarea보다 먼저 받는다
@@ -463,7 +358,7 @@ export function App(): JSX.Element {
       window.removeEventListener('compositionstart', onCompositionStart, true)
       window.removeEventListener('compositionend', onCompositionEnd, true)
     }
-  }, [closeFocusedPane, createWorkspace, splitFocused])
+  }, [])
 
   // 사이드바 애니메이션이 끝난 뒤에 크기를 다시 맞춘다. P5-5
   useEffect(() => {
@@ -647,7 +542,35 @@ export function App(): JSX.Element {
     setFind((prev) => ({ ...prev, open: true, scope, index: 0, count: 0 }))
   }, [])
 
-  overlaysRef.current = { jumpToUnread, openFind }
+  // ── 설정 (P22) ───────────────────────────────────────────────
+  useEffect(() => {
+    void window.cvmux.config().then(setConfig)
+    return window.cvmux.onConfig(setConfig)
+  }, [])
+
+  const bindings = useMemo(() => compileBindings(config.keybindings), [config.keybindings])
+  bindingsRef.current = bindings
+
+  // 폰트·색·커서는 그 자리에서 바뀐다. 셸처럼 세션을 만들 때 쓰이는 값은 main이 본다
+  useEffect(() => {
+    host.applyConfig(config)
+  }, [config, host])
+
+  // 사이드바 폭과 글자 크기는 CSS 변수 하나로 내려보낸다
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--sidebar-width', `${config.sidebar.width}px`)
+    root.style.setProperty('--sidebar-font-size', `${config.sidebar.fontSize}px`)
+  }, [config.sidebar])
+
+  /** 단축키 안내. 설정에서 바꾼 조합이 팔레트에도 그대로 보인다. P22-5 */
+  const hint = useCallback(
+    (action: string): string | undefined => {
+      const chord: Chord | undefined = bindings.get(action)
+      return chord ? formatChord(chord) : undefined
+    },
+    [bindings]
+  )
 
   // ── 명령 팔레트 (P21-6) ──────────────────────────────────────
 
@@ -665,7 +588,7 @@ export function App(): JSX.Element {
         id: 'workspace.new',
         title: '새 세션',
         keywords: 'new workspace session create',
-        hint: 'Ctrl+Shift+N',
+        hint: hint('workspace.new'),
         section: '세션',
         run: () => void createWorkspace().catch(() => undefined)
       },
@@ -673,7 +596,7 @@ export function App(): JSX.Element {
         id: 'pane.split.right',
         title: '오른쪽으로 분할',
         keywords: 'split right vertical pane',
-        hint: 'Alt+Shift+=',
+        hint: hint('pane.split.right'),
         section: 'pane',
         run: () => void splitFocused('row')
       },
@@ -681,7 +604,7 @@ export function App(): JSX.Element {
         id: 'pane.split.down',
         title: '아래로 분할',
         keywords: 'split down horizontal pane',
-        hint: 'Alt+Shift+-',
+        hint: hint('pane.split.down'),
         section: 'pane',
         run: () => void splitFocused('column')
       },
@@ -689,7 +612,7 @@ export function App(): JSX.Element {
         id: 'pane.close',
         title: '이 pane 닫기',
         keywords: 'close pane kill',
-        hint: 'Ctrl+Shift+W',
+        hint: hint('pane.close'),
         section: 'pane',
         run: closeFocusedPane
       },
@@ -707,7 +630,7 @@ export function App(): JSX.Element {
         id: 'workspace.rename',
         title: '이름 바꾸기',
         keywords: 'rename title',
-        hint: 'Ctrl+Shift+E',
+        hint: hint('workspace.rename'),
         section: '세션',
         enabled: activeId !== null,
         run: () => {
@@ -719,7 +642,7 @@ export function App(): JSX.Element {
         id: 'find.session',
         title: '이 화면에서 찾기',
         keywords: 'find search buffer',
-        hint: 'Alt+F',
+        hint: hint('find.session'),
         section: '찾기',
         run: () => openFind('session')
       },
@@ -727,7 +650,7 @@ export function App(): JSX.Element {
         id: 'find.all',
         title: '모든 세션에서 찾기',
         keywords: 'find search all sessions global',
-        hint: 'Ctrl+Shift+F',
+        hint: hint('find.all'),
         section: '찾기',
         run: () => openFind('all')
       },
@@ -735,7 +658,7 @@ export function App(): JSX.Element {
         id: 'notifications.show',
         title: unread > 0 ? `알림 보기 (${unread})` : '알림 보기',
         keywords: 'notifications inbox bell alerts',
-        hint: 'Ctrl+Shift+I',
+        hint: hint('notifications.show'),
         section: '알림',
         run: () => setInboxOpen(true)
       },
@@ -743,7 +666,7 @@ export function App(): JSX.Element {
         id: 'notifications.jump',
         title: '읽지 않은 알림으로 이동',
         keywords: 'jump unread notification next',
-        hint: 'Ctrl+Shift+U',
+        hint: hint('notifications.jump'),
         section: '알림',
         enabled: unread > 0,
         run: jumpToUnread
@@ -760,7 +683,7 @@ export function App(): JSX.Element {
         id: 'view.sidebar',
         title: sidebarCollapsed ? '사이드바 펴기' : '사이드바 접기',
         keywords: 'sidebar toggle view',
-        hint: 'Ctrl+Shift+B',
+        hint: hint('view.sidebar'),
         section: '보기',
         run: () => setSidebarCollapsed((v) => !v)
       }
@@ -774,7 +697,7 @@ export function App(): JSX.Element {
         id: `goto.${workspace.id}`,
         title,
         keywords: `goto switch workspace ${meta?.git?.repo ?? ''} ${meta?.cwd ?? ''}`,
-        hint: index < 8 ? `Ctrl+Alt+${index + 1}` : undefined,
+        hint: index < 8 ? hint(`workspace.select.${index + 1}`) : undefined,
         section: '이동',
         enabled: workspace.id !== activeId,
         run: () => setActiveId(workspace.id)
@@ -787,6 +710,7 @@ export function App(): JSX.Element {
     closeFocusedPane,
     createWorkspace,
     focusedId,
+    hint,
     jumpToUnread,
     notifications,
     openFind,
@@ -795,6 +719,37 @@ export function App(): JSX.Element {
     splitFocused,
     workspaces
   ])
+
+  /*
+   * 단축키가 곧 팔레트 항목이다 (P22-5).
+   *
+   * 눌린 조합이 가리키는 동작 이름으로 명령을 찾아 그대로 실행한다. 표를 둘로
+   * 나누면 언젠가 한쪽만 손보게 되고, 그러면 팔레트로는 되는데 단축키로는 안
+   * 되는 동작이 생긴다.
+   */
+  runActionRef.current = (action: string): void => {
+    const select = /^workspace\.select\.([1-8])$/.exec(action)
+    if (select) {
+      const target = workspacesRef.current[Number.parseInt(select[1], 10) - 1]
+      if (target) setActiveId(target.id)
+      return
+    }
+
+    // 팔레트는 토글이 아니라 열기다. 단축키로는 다시 눌러 닫을 수 있어야 한다
+    if (action === 'view.palette') {
+      setInboxOpen(false)
+      setPaletteOpen((v) => !v)
+      return
+    }
+    if (action === 'notifications.show') {
+      setPaletteOpen(false)
+      setInboxOpen((v) => !v)
+      return
+    }
+
+    const command = commands.find((c) => c.id === action)
+    if (command && command.enabled !== false) command.run()
+  }
 
   /*
    * 제어 소켓이 묻는 것에 답한다 (P20-7).

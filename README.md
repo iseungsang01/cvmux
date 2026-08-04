@@ -35,7 +35,9 @@ macOS를 쓴다면 cvmux 대신 cmux를 받는 편이 낫다 — 훨씬 완성�
   들여다보면 꺼지지만, 무엇을 알리려 했는지는 여기 남는다
 - **CLI와 소켓 API** — 세션 안에서 `cvmux`를 부르면 워크스페이스를 만들고,
   분할하고, 키를 보내고, 화면을 읽을 수 있다
-- 명령 팔레트 · 찾기 · 분할 창 · 세션 영속성 · 한글 UTF-8 · 트루컬러
+- **에이전트 이어서 띄우기** — 앱을 껐다 켜면 Claude Code 대화가 그 자리에서 이어진다
+- 설정 파일 · 단축키 커스터마이즈 · 명령 팔레트 · 찾기 · 분할 창 · 세션 영속성 ·
+  한글 UTF-8 · 트루컬러
 
 ## 설치와 실행
 
@@ -232,6 +234,70 @@ cvmux events --after 120               # 놓친 구간부터 따라잡기
 
 전체 명령은 `cvmux --help`에 있다. 프로토콜과 규칙은 [POLICY.md](./POLICY.md)의 P20.
 
+## 설정
+
+`%APPDATA%\cvmux\cvmux.json`을 읽는다(`~/.config/cvmux/cvmux.json`도 본다).
+없으면 처음 실행할 때 **주석이 달린 본보기**를 만들어 둔다.
+
+```jsonc
+{
+  "terminal": {
+    "fontFamily": "Cascadia Mono, Consolas, monospace",
+    "fontSize": 14,
+    "cursorStyle": "block",     // bar | block | underline
+    "shell": null               // 비우면 pwsh → powershell → cmd 순으로 찾는다
+  },
+  "sidebar": { "width": 300 },
+  "theme": { "background": "#0d1016", "blue": "#7aa2f7" },
+  "keybindings": { "view.palette": "Alt+Shift+P" }
+}
+```
+
+저장하면 바로 반영된다 — 폰트·색·커서·단축키는 그 자리에서, 셸은 다음 세션부터.
+주석과 마지막 쉼표를 써도 된다.
+
+**값 하나가 잘못돼도 나머지는 살아 있다.** 그 값만 기본값으로 되돌리고, 무엇을
+무시했는지는 `cvmux config doctor`가 알려준다. 오타 난 키도 짚어 준다 —
+`fontSizze`는 아무 일도 일으키지 않는데, 아무 일도 일어나지 않는 것이 가장
+알아채기 어렵기 때문이다.
+
+```powershell
+cvmux config path      # 어디를 읽는지
+cvmux config init      # 본보기 만들기
+cvmux config doctor    # 검사 (앱이 꺼져 있어도 된다)
+```
+
+단축키는 동작 이름에 조합을 붙인다. 키 이름은 **자판의 자리**(`event.code`)라
+한글 자판에서도 같은 자리가 같은 키다. 빈 문자열이면 그 단축키를 없앤다.
+
+## 에이전트 이어서 띄우기
+
+```powershell
+cvmux hooks setup      # Claude Code 훅 설치
+cvmux hooks status
+cvmux hooks uninstall
+```
+
+훅이 하는 일은 둘이다. 대화가 시작되면 **세션 id를 적어 두고**, 확인을 기다리면
+**cvmux에 알린다**. 알림을 OSC 대신 소켓으로 보내므로 훅의 stdout이 캡처돼도
+닿는다.
+
+앱을 껐다 켜면 그 셸에서 `claude --resume <id>`가 이어서 뜬다. 끄려면
+`terminal.autoResumeAgentSessions`를 `false`로.
+
+자동 설치는 **Claude Code만** 한다. 다른 에이전트의 훅 파일 형식을 확인 없이
+짐작해서 쓰면 남의 설정을 망가뜨린다. 대신 훅 한 줄만 직접 걸면 같은 것이 된다.
+
+```
+cvmux hooks record --agent codex
+```
+
+이어서 띄우기까지 아는 에이전트는 `claude` · `codex` · `gemini` · `copilot` ·
+`cursor` · `codebuddy` · `factory` · `qoder`다. 그 밖은 기록만 남는다.
+
+설치할 때 우리가 넣은 항목에 표시를 남기므로, 제거해도 **직접 걸어 둔 훅은
+그대로 남는다**. 원본은 `settings.json.cvmux-backup`으로 한 번 남긴다.
+
 ## 단축키
 
 | 키 | 동작 |
@@ -247,6 +313,8 @@ cvmux events --after 120               # 놓친 구간부터 따라잡기
 | `Ctrl+Shift+U` | 읽지 않은 알림으로 이동 |
 | `Alt+F` | 이 화면에서 찾기 |
 | `Ctrl+Shift+F` | 모든 세션에서 찾기 |
+
+전부 `cvmux.json`의 `keybindings`에서 바꿀 수 있다.
 | `Ctrl+V` | 붙여넣기 (클립보드에 이미지만 있으면 그대로 세션에 전달) |
 | `Enter` (종료된 pane에서) | 같은 디렉토리에서 재시작 |
 | 사이드바 제목 더블클릭 | 이름 바꾸기 |
@@ -307,6 +375,8 @@ src/
     ansi-parser.ts     증분 ANSI/OSC 파서 (청크 경계에 걸린 시퀀스 처리)
     session-state.ts   상태 판정 엔진 (P4)
     notifications.ts   알림함 (P21)
+    config-store.ts    설정 파일 읽기·감시 (P22)
+    agent-sessions.ts  에이전트 대화 기록 (P22-8)
     pty-manager.ts     PTY 생명주기, 프로세스 트리 정리, 출력 배칭
     store.ts           세션·배치 영속성 (P16/P17)
   main/                Electron 메인 프로세스 — PTY를 직접 소유한다

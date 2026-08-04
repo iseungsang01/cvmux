@@ -4,7 +4,7 @@ import type { NotificationStore } from '@core/notifications'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
-import { IPC, type CreateSessionOptions, type Workspace } from '@shared/types'
+import { IPC, type CreateSessionOptions, type CvmuxConfig, type Workspace } from '@shared/types'
 import type { ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
 
@@ -65,9 +65,12 @@ export function registerIpc(
   manager: PtyManager,
   notifier: Notifier,
   layout: LayoutStore,
-  inbox: NotificationStore
+  inbox: NotificationStore,
+  config: () => CvmuxConfig
 ): ControlBridge {
   const bridge = new RendererBridge()
+
+  ipcMain.handle(IPC.CONFIG, () => config())
 
   /** 사용자가 지금 보고 있는 세션. 토스트를 띄울지 판단에 쓴다. P15-2 */
   let activeSessionId: string | null = null

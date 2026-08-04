@@ -20,6 +20,7 @@
   --done: #f7768e;
   --danger: #f7768e;
   --sidebar-width: 264px;
+  --sidebar-font-size: 13px;
   --titlebar-height: 36px;
 }
 
@@ -101,6 +102,8 @@ kbd {
   flex-direction: column;
   flex-shrink: 0;
   width: var(--sidebar-width);
+  /* 폭과 글자 크기는 설정이 정한다. P22-2 */
+  font-size: var(--sidebar-font-size);
   border-right: 1px solid var(--border);
   background: var(--bg-sidebar);
   transition: width 180ms ease, opacity 180ms ease;

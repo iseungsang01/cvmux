@@ -5,6 +5,7 @@ import {
   type ClipboardContent,
   type ControlAsk,
   type CreateSessionOptions,
+  type CvmuxConfig,
   type CreateSessionResult,
   type CvmuxApi,
   type Notification,
@@ -53,6 +54,7 @@ const api: CvmuxApi = {
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,
+  config: () => ipcRenderer.invoke(IPC.CONFIG) as Promise<CvmuxConfig>,
   notifications: () => ipcRenderer.invoke(IPC.NOTIFICATIONS) as Promise<Notification[]>,
   notificationRead: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_READ, id) as Promise<boolean>,
   notificationUnread: (id) => ipcRenderer.invoke(IPC.NOTIFICATION_UNREAD, id) as Promise<boolean>,
@@ -67,7 +69,8 @@ const api: CvmuxApi = {
   onCreated: (cb) => subscribe<[SessionMeta]>(IPC.EVT_CREATED, cb),
   onActivate: (cb) => subscribe<[string]>(IPC.EVT_ACTIVATE, cb),
   onControlRequest: (cb) => subscribe<[ControlAsk]>(IPC.EVT_CTL_REQUEST, cb),
-  onNotifications: (cb) => subscribe<[Notification[]]>(IPC.EVT_NOTIFICATIONS, cb)
+  onNotifications: (cb) => subscribe<[Notification[]]>(IPC.EVT_NOTIFICATIONS, cb),
+  onConfig: (cb) => subscribe<[CvmuxConfig]>(IPC.EVT_CONFIG, cb)
 }
 
 contextBridge.exposeInMainWorld('cvmux', api)

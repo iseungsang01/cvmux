@@ -168,6 +168,8 @@ export const M = {
 
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',
+  /** 설정 파일을 다시 읽는다. P22-6 */
+  CONFIG_RELOAD: 'config.reload',
   /** 알림함·팔레트·찾기를 소켓에서 연다. cmux의 `right-sidebar show`에 해당. P21-11 */
   APP_PANEL: 'app.panel',
 

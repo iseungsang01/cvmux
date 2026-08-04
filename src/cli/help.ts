@@ -65,6 +65,19 @@ pane:
   panel <이름>           알림함·팔레트·찾기 열기 (notifications|palette|find)
                          --close로 닫고, find는 --scope all로 전체 검색
 
+설정:
+  config path            설정 파일 자리
+  config init            주석이 달린 본보기 만들기
+  config doctor          설정 검사 (--path, --json). 앱이 꺼져 있어도 된다
+  config reload          앱에 다시 읽으라고 알린다
+
+에이전트 훅:
+  hooks setup            Claude Code 훅 설치 (세션 기록 + 알림)
+  hooks uninstall        제거
+  hooks status           설치 상태
+  hooks record --agent <이름>   훅이 부르는 명령. 세션 id를 stdin JSON에서 읽는다
+  hooks notify --agent <이름>   훅이 부르는 명령. 알림을 cvmux로 보낸다
+
 기타:
   open <path>            그 디렉토리에서 새 워크스페이스
   version                버전
@@ -109,6 +122,8 @@ const USAGE: Record<string, string> = {
   'open-notification': 'Usage: cvmux open-notification [handle]',
   'jump-to-unread': 'Usage: cvmux jump-to-unread',
   panel: 'Usage: cvmux panel <notifications|palette|find> [query] [--close] [--scope all] [--query <text>]',
+  config: 'Usage: cvmux config <path|init|doctor|reload> [--path <file>] [--json]',
+  hooks: 'Usage: cvmux hooks <setup|uninstall|status|record|notify> [--agent <name>]',
   open: 'Usage: cvmux open <path>',
   version: 'Usage: cvmux version',
   help: 'Usage: cvmux help'

@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { NotificationStore } from '../src/core/notifications'
+import { DEFAULT_CONFIG } from '../src/shared/config'
 import type { PtyManager } from '../src/core/pty-manager'
 import type { SessionMeta } from '../src/shared/types'
 import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
@@ -177,6 +178,7 @@ async function main(): Promise<void> {
       showWindow: () => {
         focused++
       },
+      reloadConfig: () => ({ config: DEFAULT_CONFIG, source: null, problems: [] }),
       version: '0.1.0-test'
     },
     pipe,
