@@ -254,4 +254,8 @@ tests/                 상태 감지 엔진 회귀 테스트
 
 ## 라이선스
 
-MIT
+[GPL-3.0-or-later](./LICENSE).
+
+cvmux는 [cmux](https://github.com/manaflow-ai/cmux)(GPL-3.0-or-later)에서
+파생된 저작물을 포함하므로 같은 라이선스를 따른다. 무엇을 어떤 형태로
+가져왔는지는 [NOTICE.md](./NOTICE.md)에 적어 두었다.

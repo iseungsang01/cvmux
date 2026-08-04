@@ -4,7 +4,7 @@
   "private": true,
   "description": "A cmux-inspired terminal workspace manager for Windows — run many PowerShell sessions and watch them all from one sidebar.",
   "author": "iseungsang01",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

@@ -1,6 +1,6 @@
 appId: com.cvmux.app
 productName: cvmux
-copyright: MIT
+copyright: Copyright (c) 2026 iseungsang01 and cvmux contributors. GPL-3.0-or-later.
 
 directories:
   output: release
