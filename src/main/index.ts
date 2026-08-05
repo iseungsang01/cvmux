@@ -10,6 +10,7 @@ import { WorkspaceMetaStore } from '@core/workspace-meta'
 import { CLI_DIR_KEY, PtyManager } from '@core/pty-manager'
 import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@core/store'
 import { POLICY } from '@shared/policy'
+import { EV } from '@shared/protocol'
 import { IPC, type Workspace } from '@shared/types'
 import { BrowserManager } from './browser'
 import { ControlSocketServer, type WindowControl, pipePathFor } from './control-socket'
@@ -514,7 +515,9 @@ if (!app.requestSingleInstanceLock()) {
       browsers,
       workspaceMeta,
       updater,
-      windows
+      windows,
+      // 소켓은 이 아래에서 열린다 — 부를 때의 것을 집는다
+      (payload) => control?.emit(EV.WORKSPACE_SELECTED, payload)
     )
 
     /*

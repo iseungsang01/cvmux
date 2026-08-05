@@ -301,5 +301,7 @@ export const EV = {
   SESSION_CLOSED: 'session.closed',
   SESSION_EXITED: 'session.exited',
   SESSION_STATUS: 'session.status',
-  SESSION_NOTIFY: 'session.notify'
+  SESSION_NOTIFY: 'session.notify',
+  /** 사용자가 다른 워크스페이스로 옮겨 갔다. 배치는 렌더러가 알므로 그쪽에서 온다. P27-5 */
+  WORKSPACE_SELECTED: 'workspace.selected'
 } as const

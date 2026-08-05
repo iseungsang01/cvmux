@@ -110,7 +110,14 @@ export function registerIpc(
   browsers: BrowserManager,
   meta: WorkspaceMetaStore,
   updater: UpdateManager,
-  windows: WindowRegistry
+  windows: WindowRegistry,
+  /**
+   * 워크스페이스 전환을 소켓 구독자에게 흘린다.
+   *
+   * 소켓 서버는 이 시점에 아직 없다 — 늦게 불리므로 호출자가 그때의 서버를
+   * 집어 준다(main/index.ts).
+   */
+  onWorkspaceSelected: (payload: Record<string, unknown>) => void
 ): ControlBridge {
   const bridge = new RendererBridge(windows)
 
@@ -245,6 +252,26 @@ export function registerIpc(
 
   ipcMain.handle(IPC.SET_ACTIVE, (_event, id: unknown) => {
     activeSessionId = typeof id === 'string' ? id : null
+    return true
+  })
+
+  /*
+   * 워크스페이스 전환 (P20-9).
+   *
+   * 같은 값이 다시 와도 흘리지 않는다 — 렌더러는 자기 사정으로 여러 번 알릴 수
+   * 있고, 바뀌지 않은 것을 이벤트라 부르면 구독자가 스스로 걸러야 한다.
+   */
+  let activeWorkspaceId: string | null = null
+  ipcMain.handle(IPC.SET_ACTIVE_WORKSPACE, (event, id: unknown) => {
+    const next = typeof id === 'string' ? id : null
+    if (next === activeWorkspaceId) return true
+    activeWorkspaceId = next
+    if (next !== null) {
+      onWorkspaceSelected({
+        workspace_id: next,
+        window_id: windows.ofWebContents(event.sender.id)?.id ?? null
+      })
+    }
     return true
   })
 

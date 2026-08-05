@@ -264,6 +264,13 @@ export const IPC = {
   WRITE_CLIPBOARD: 'app:write-clipboard',
   /** 어떤 세션을 보고 있는지 main에 알린다 — 토스트를 띄울지 판단에 쓴다. P15-2 */
   SET_ACTIVE: 'app:set-active',
+  /**
+   * 어떤 워크스페이스를 보고 있는지 알린다.
+   *
+   * main은 세션만 알고 배치는 렌더러가 든다(P20-7). 소켓 구독자에게
+   * `workspace.selected`를 흘리려면 이 한 걸음이 필요하다.
+   */
+  SET_ACTIVE_WORKSPACE: 'app:set-active-workspace',
   /** pane 배치 저장/복원. P16 / P17 */
   LOAD_LAYOUT: 'layout:load',
   SAVE_LAYOUT: 'layout:save',
@@ -381,6 +388,8 @@ export interface CvmuxApi {
   /** 선택한 텍스트를 클립보드에 넣는다. P6-1 */
   writeClipboard(text: string): Promise<boolean>
   setActive(id: string | null): Promise<boolean>
+  /** 보고 있는 워크스페이스를 알린다 — 소켓의 `workspace.selected`가 여기서 나온다 */
+  setActiveWorkspace(id: string | null): Promise<boolean>
   /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
   loadLayout(): Promise<RestoredLayout>
   saveLayout(workspaces: Workspace[]): Promise<boolean>

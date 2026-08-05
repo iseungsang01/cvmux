@@ -54,6 +54,8 @@ const api: CvmuxApi = {
   readClipboard: () => ipcRenderer.invoke(IPC.READ_CLIPBOARD) as Promise<ClipboardContent>,
   writeClipboard: (text) => ipcRenderer.invoke(IPC.WRITE_CLIPBOARD, text) as Promise<boolean>,
   setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
+  setActiveWorkspace: (id) =>
+    ipcRenderer.invoke(IPC.SET_ACTIVE_WORKSPACE, id) as Promise<boolean>,
   loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<RestoredLayout>,
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
   controlReply: (id, ok, payload) =>
