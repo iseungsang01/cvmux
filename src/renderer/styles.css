@@ -1270,6 +1270,7 @@ kbd {
 }
 
 .surface-tab {
+  position: relative; /* 드롭 위치 선(::after)의 기준. P24-3 */
   display: flex;
   flex: 0 1 auto;
   align-items: center;
@@ -1300,6 +1301,37 @@ kbd {
 .surface-tab.is-unread {
   color: var(--accent);
   font-weight: 600;
+}
+
+/*
+ * 탭 끌어 옮기기 (P24-3).
+ *
+ * 사이드바 줄 재정렬(P19-8)과 같은 어법이되 선의 방향만 다르다 — 탭은 가로로
+ * 늘어서므로 세로선을 긋는다. 끌던 탭 자체는 옅게 두어 어느 것이 손에 들려
+ * 있는지 보인다.
+ */
+.surface-tab.is-dragging {
+  opacity: 0.4;
+}
+
+.surface-tab.is-drop-before::after,
+.surface-tab.is-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.surface-tab.is-drop-before::after {
+  left: -2px;
+}
+
+.surface-tab.is-drop-after::after {
+  right: -2px;
 }
 
 .surface-tab-label {

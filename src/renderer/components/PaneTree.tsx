@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type JSX,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 
 import type { BrowserMeta, PaneNode, SessionMeta } from '@shared/types'
 import { exitLabel, isFailedExit } from '../lib/format'
@@ -30,6 +37,8 @@ interface PaneTreeProps {
   /** 가로 탭 (P24) */
   onSelectSurface(paneId: string, index: number): void
   onCloseSurface(surfaceId: string): void
+  /** 탭을 끌어 자리를 바꾼다. P24-3 */
+  onMoveSurface(paneId: string, from: number, to: number): void
 }
 
 /**
@@ -47,6 +56,7 @@ interface SurfaceTabsProps {
   onSelect(paneId: string, index: number): void
   onClose(surfaceId: string): void
   onFocusPane(paneId: string): void
+  onMove(paneId: string, from: number, to: number): void
 }
 
 function SurfaceTabs({
@@ -57,8 +67,23 @@ function SurfaceTabs({
   browsers,
   onSelect,
   onClose,
-  onFocusPane
+  onFocusPane,
+  onMove
 }: SurfaceTabsProps): JSX.Element {
+  /*
+   * 끌고 있는 탭 (P24-3).
+   *
+   * 어느 자리에 놓일지는 끌던 탭과 지나는 탭의 관계로만 정해지므로, 상태는
+   * 탭 하나가 아니라 탭 바가 들고 있어야 한다 — 사이드바 줄 재정렬과 같다(P19-8).
+   */
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [overIndex, setOverIndex] = useState<number | null>(null)
+
+  const endDrag = (): void => {
+    setDragFrom(null)
+    setOverIndex(null)
+  }
+
   return (
     <div className="surface-tabs" role="tablist">
       {surfaces.map((id, index) => {
@@ -72,10 +97,42 @@ function SurfaceTabs({
         return (
           <div
             key={id}
-            className={`surface-tab${index === active ? ' is-active' : ''}${unread ? ' is-unread' : ''}`}
+            className={[
+              'surface-tab',
+              index === active ? 'is-active' : '',
+              unread ? 'is-unread' : '',
+              dragFrom === index ? 'is-dragging' : '',
+              // 끌어온 방향이 선의 위치를 정한다 — 놓으면 그 자리에 들어간다
+              dragFrom !== null && overIndex === index && dragFrom !== index
+                ? dragFrom < index
+                  ? 'is-drop-after'
+                  : 'is-drop-before'
+                : ''
+            ]
+              .filter(Boolean)
+              .join(' ')}
             role="tab"
             aria-selected={index === active}
             title={label}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData('text/plain', String(index))
+              event.dataTransfer.effectAllowed = 'move'
+              setDragFrom(index)
+            }}
+            onDragOver={(event) => {
+              // preventDefault를 해야 이 탭이 드롭을 받는다
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              setOverIndex(index)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (dragFrom !== null && dragFrom !== index) onMove(paneId, dragFrom, index)
+              endDrag()
+            }}
+            // 탭 바 밖에서 손을 놓아도 끌던 표시는 걷어야 한다
+            onDragEnd={endDrag}
             onPointerDown={(event) => {
               // 가운데 버튼으로 닫기 — 브라우저 탭의 관례다
               if (event.button === 1) {
@@ -124,7 +181,8 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
     onFocusPane,
     onResize,
     onSelectSurface,
-    onCloseSurface
+    onCloseSurface,
+    onMoveSurface
   } = props
 
   if (node.kind === 'leaf') {
@@ -159,6 +217,7 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
             onSelect={onSelectSurface}
             onClose={onCloseSurface}
             onFocusPane={onFocusPane}
+            onMove={onMoveSurface}
           />
         )}
 

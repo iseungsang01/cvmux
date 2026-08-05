@@ -17,6 +17,7 @@ import {
   cycleSurface,
   findLeafBySession,
   firstLeafId,
+  moveSurface,
   paneCount,
   resizeSplit,
   selectSurface,
@@ -326,6 +327,22 @@ function main(): void {
      */
     check('P24-4 숨은 것까지', collectAllSurfaces(tree).join(',') === 'a,b', collectAllSurfaces(tree).join(','))
     check('P24-4 숨은 탭으로도 잎을 찾는다', findLeafBySession(tree, 'a') !== null)
+  }
+
+  // ── 탭 순서 바꾸기 (P24-3)
+  {
+    const base = createLeaf('a')
+    const paneId = base.id
+    const withB = addSurface(base, paneId, 'b') ?? base
+    const tree = selectSurface(addSurface(withB, paneId, 'c') ?? withB, paneId, 0)
+
+    const moved = moveSurface(tree, paneId, 0, 2)
+    check('탭을 끝으로 옮긴다', shape(moved) === '[b|c|*a]', shape(moved))
+
+    const other = moveSurface(selectSurface(tree, paneId, 1), paneId, 0, 2)
+    check('다른 탭을 옮기면 자리만 보정', shape(other) === '[*b|c|a]', shape(other))
+    check('범위 밖이면 그대로', shape(moveSurface(tree, paneId, 0, 9)) === shape(tree))
+    check('제자리면 그대로', shape(moveSurface(tree, paneId, 1, 1)) === shape(tree))
   }
 
   console.log(results.join('\n'))

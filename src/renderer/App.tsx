@@ -25,6 +25,7 @@ import {
   findLeaf,
   findLeafBySession,
   firstLeafId,
+  moveSurface,
   resizeSplit,
   selectSurface,
   splitPane
@@ -265,6 +266,15 @@ export function App(): JSX.Element {
     )
   }, [])
 
+  /** 탭을 끌어 자리를 바꾼다. 저장은 배치 변경을 지켜보는 기존 경로가 한다. P24-3 */
+  const handleMoveSurface = useCallback((paneId: string, from: number, to: number): void => {
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeIdRef.current ? { ...w, root: moveSurface(w.root, paneId, from, to) } : w
+      )
+    )
+  }, [])
+
   /**
    * 지금 pane에 탭을 하나 더 연다 (P24-1).
    *
@@ -494,6 +504,11 @@ export function App(): JSX.Element {
     // 마지막 워크스페이스를 닫아도 앱은 살아있고, 빈 상태 화면을 보여준다. P1-7
     setActiveId(workspaces[0]?.id ?? null)
   }, [workspaces, activeId])
+
+  // 워크스페이스를 옮겨 가면 main에 알린다 — 소켓의 `workspace.selected`가 여기서 나온다
+  useEffect(() => {
+    void window.cvmux.setActiveWorkspace(activeId)
+  }, [activeId])
 
   // 포커스된 pane이 바뀌면 main에 알리고(P15-2) 미읽음을 해제한다(P4-5)
   const focusedId = activeWorkspace ? focusedSessionId(activeWorkspace) : null
@@ -1262,6 +1277,7 @@ export function App(): JSX.Element {
                     onResize={handleResize}
                     onSelectSurface={handleSelectSurface}
                     onCloseSurface={closeSurface}
+                    onMoveSurface={handleMoveSurface}
                   />
                 </div>
               ))}
