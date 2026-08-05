@@ -302,10 +302,13 @@ function requestQuit(): void {
  *
  * 설치는 앱을 끄고 설치 프로그램을 띄운다 — 실행 중인 세션이 전부 끝난다.
  * 종료와 같은 무게의 일이므로 종료와 같은 방식으로 묻는다(P10-1).
+ *
+ * **화면에서 오는 길은 전부 여기를 지난다** — 타이틀바 버튼도, 명령 팔레트도,
+ * 트레이 메뉴도. `updater.install()`을 직접 부르는 것은 소켓뿐이다(P26-3).
  */
-async function confirmInstall(): Promise<void> {
+async function confirmInstall(): Promise<boolean> {
   const state = updater.current
-  if (state.status !== 'ready') return
+  if (state.status !== 'ready') return false
 
   showWindow()
   const busy = manager.busyCount()
@@ -315,16 +318,18 @@ async function confirmInstall(): Promise<void> {
     defaultId: 1,
     cancelId: 1,
     title: 'cvmux',
-    message: `${state.version} 버전이 준비됐습니다.`,
+    // 어디서 어디로 가는지 함께 보여준다 — 지금 것이 최신이라고 믿는 사람에게
+    // "새 버전이 준비됐다"는 말만으로는 무슨 일인지 알 수 없다
+    message: `${state.installed} → ${state.version} 업데이트가 준비됐습니다.`,
     detail:
       busy > 0
         ? `설치하면 앱이 종료되고 실행 중인 세션 ${busy}개가 함께 끝납니다.`
         : '설치하면 앱이 종료되었다가 새 버전으로 다시 시작합니다.'
   })
-  if (response !== 0) return
+  if (response !== 0) return false
 
   quitting = true
-  updater.install()
+  return updater.install()
 }
 
 function createWindow(): BrowserWindow {
@@ -515,6 +520,8 @@ if (!app.requestSingleInstanceLock()) {
       browsers,
       workspaceMeta,
       updater,
+      // 화면에서 누른 설치는 묻고 나서 한다. P26-3
+      confirmInstall,
       windows,
       // 소켓은 이 아래에서 열린다 — 부를 때의 것을 집는다
       (payload) => control?.emit(EV.WORKSPACE_SELECTED, payload)

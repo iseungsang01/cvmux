@@ -74,7 +74,9 @@ export function App(): JSX.Element {
     version: null,
     notes: null,
     error: null,
-    percent: 0
+    percent: 0,
+    // main이 곧 진짜 값을 내려준다 — 그 전까지는 비교할 것이 없다
+    installed: ''
   })
   const [find, setFind] = useState<{
     open: boolean
@@ -1168,7 +1170,11 @@ export function App(): JSX.Element {
             type="button"
             className="titlebar-update"
             onClick={() => void window.cvmux.updateInstall()}
-            title={`${update.version ?? '새 버전'} 설치 — 앱이 다시 시작합니다`}
+            title={
+              update.installed
+                ? `${update.installed} → ${update.version ?? '새 버전'} — 누르면 설치할지 묻습니다`
+                : `${update.version ?? '새 버전'} — 누르면 설치할지 묻습니다`
+            }
           >
             업데이트 준비됨
           </button>

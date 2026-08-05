@@ -37,7 +37,14 @@ const FIRST_CHECK_MS = 20_000
 const INTERVAL_MS = 6 * 60 * 60 * 1000
 
 export class UpdateManager {
-  private state: UpdateState = { status: 'idle', version: null, notes: null, error: null, percent: 0 }
+  private state: UpdateState = {
+    status: 'idle',
+    version: null,
+    notes: null,
+    error: null,
+    percent: 0,
+    installed: app.getVersion()
+  }
   private timer: NodeJS.Timeout | null = null
   private firstTimer: NodeJS.Timeout | null = null
 

@@ -167,6 +167,14 @@ export interface UpdateState {
   notes: string | null
   error: string | null
   percent: number
+  /**
+   * 지금 돌고 있는 버전.
+   *
+   * `version`만으로는 무엇에서 무엇으로 가는지 알 수 없다. 방금 새 설치본을
+   * 만든 사람은 자기가 최신이라고 믿는데, 정작 떠 있는 것은 그 전 버전일 수
+   * 있다 — 그때 "0.1.3 준비됨"은 오작동처럼 보인다. 둘을 나란히 보여준다.
+   */
+  installed: string
 }
 
 /** 오른쪽 사이드바가 지금 무엇을 보여주는가. P25-7 */

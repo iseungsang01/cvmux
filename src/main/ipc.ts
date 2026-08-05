@@ -110,6 +110,13 @@ export function registerIpc(
   browsers: BrowserManager,
   meta: WorkspaceMetaStore,
   updater: UpdateManager,
+  /**
+   * 화면에서 부른 설치 (P26-3).
+   *
+   * 묻는 일은 main이 한다 — 렌더러가 자기 대화상자를 띄우면 창을 닫아 둔 채
+   * 트레이에서 누른 경우와 답이 달라진다. 설치를 시작했으면 true.
+   */
+  requestInstall: () => Promise<boolean>,
   windows: WindowRegistry,
   /**
    * 워크스페이스 전환을 소켓 구독자에게 흘린다.
@@ -126,7 +133,13 @@ export function registerIpc(
   // ── 자동 업데이트 (P26) ─────────────────────────────────────
   ipcMain.handle(IPC.UPDATE_STATE, () => updater.current)
   ipcMain.handle(IPC.UPDATE_CHECK, () => updater.check(true))
-  ipcMain.handle(IPC.UPDATE_INSTALL, () => updater.install())
+  /*
+   * 화면에서 오는 설치는 그냥 실행하지 않는다 (P26-3).
+   *
+   * 여기서 `updater.install()`을 바로 부르면 버튼 한 번에 앱이 꺼지고 실행 중인
+   * 세션이 전부 끝난다. 종료와 같은 무게의 일이므로 종료와 같은 방식으로 묻는다.
+   */
+  ipcMain.handle(IPC.UPDATE_INSTALL, () => requestInstall())
 
   // ── 사이드바 메타데이터 (P25) ────────────────────────────────
   ipcMain.handle(IPC.WORKSPACE_META, () => meta.all())
