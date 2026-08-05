@@ -45,9 +45,9 @@ const SWITCHES: ReadonlySet<string> = new Set([
   'json',
   'enter',
   'all',
+  'unread',
   'close',
-  'reconnect',
-  'no-ack'
+  'stop'
 ])
 
 function parse(argv: string[]): Parsed {
@@ -485,15 +485,17 @@ async function run(
       })
 
     case 'list-notifications':
-      return client.call(M.NOTIFICATION_LIST)
+      return client.call(M.NOTIFICATION_LIST, { unread: flags.get('unread') === true })
     case 'mark-notification-read':
       return client.call(M.NOTIFICATION_MARK_READ, {
         session: flags.get('all') === true ? undefined : (args[0] ?? defaultSession(flags))
       })
+    // 지우는 것은 알림 하나다 — 세션이 아니다. 서버는 `notification`으로 받는다
     case 'dismiss-notification':
-      return client.call(M.NOTIFICATION_DISMISS, { session: args[0] })
+      return client.call(M.NOTIFICATION_DISMISS, { notification: args[0] })
+    // --all이 없으면 읽은 것만 치운다. P21-2
     case 'clear-notifications':
-      return client.call(M.NOTIFICATION_CLEAR)
+      return client.call(M.NOTIFICATION_CLEAR, { all: flags.get('all') === true })
     case 'open-notification':
       return client.call(M.NOTIFICATION_OPEN, { session: args[0] ?? defaultSession(flags) })
     case 'jump-to-unread':

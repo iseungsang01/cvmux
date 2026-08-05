@@ -72,8 +72,9 @@ pane:
 
 알림:
   notify <text>          알림 보내기 (--title)
-  list-notifications     읽지 않은 알림
+  list-notifications     알림 목록 (--unread면 읽지 않은 것만)
   mark-notification-read [h]   읽음 처리 (--all)
+  dismiss-notification <id>    알림 하나를 목록에서 지운다
   open-notification [h]  그 세션으로 이동하고 읽음 처리
   jump-to-unread         가장 최근 읽지 않은 알림으로 이동
   clear-notifications    읽은 알림 치우기 (--all이면 전부)
@@ -183,10 +184,10 @@ const USAGE: Record<string, string> = {
   'close-session': 'Usage: cvmux close-session [handle]',
   'restart-session': 'Usage: cvmux restart-session [handle]',
   notify: 'Usage: cvmux notify <text> [--title <title>] [--session <handle>]',
-  'list-notifications': 'Usage: cvmux list-notifications',
+  'list-notifications': 'Usage: cvmux list-notifications [--unread]',
   'mark-notification-read': 'Usage: cvmux mark-notification-read [handle] [--all]',
-  'dismiss-notification': 'Usage: cvmux dismiss-notification <handle>',
-  'clear-notifications': 'Usage: cvmux clear-notifications',
+  'dismiss-notification': 'Usage: cvmux dismiss-notification <notification-id>',
+  'clear-notifications': 'Usage: cvmux clear-notifications [--all]',
   'open-notification': 'Usage: cvmux open-notification [handle]',
   'jump-to-unread': 'Usage: cvmux jump-to-unread',
   panel: 'Usage: cvmux panel <notifications|palette|find> [query] [--close] [--scope all] [--query <text>]',
