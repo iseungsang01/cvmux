@@ -24,16 +24,25 @@ publish:
 # 빌드 도구를 깔아야 하는데 얻는 게 없다.
 npmRebuild: false
 
-# renderer/main/preload는 전부 out/ 에 번들되어 있다. node_modules에서 실제로
-# 필요한 것은 네이티브 모듈인 node-pty 하나뿐이라 나머지는 담지 않는다.
+# 무엇을 담을지 손으로 적지 않는다.
+#
+# main 번들은 npm 패키지 둘을 밖에 남긴다 — 네이티브 모듈인 node-pty와
+# electron-updater다. electron-builder는 package.json의 dependencies를 따라가
+# 그 둘과 딸린 것들을 알아서 담는다. 한때 "node-pty 하나뿐"이라 적어 두고
+# 나머지를 통째로 제외했었는데, 그 뒤 electron-updater가 들어오면서 목록이
+# 조용히 낡았고 **설치본이 뜨자마자 죽었다** — `Cannot find module
+# 'electron-updater'`. 의존성 목록을 두 곳에 적으면 언젠가 한쪽만 손보게 된다.
 files:
   - out/**/*
   - package.json
   # 트레이 아이콘은 런타임에 읽는다 — buildResources는 앱 안에 들어가지 않으므로
   # 이 한 장은 따로 담아야 한다. P18
   - build/icon.png
-  - '!node_modules/**/*'
-  - node_modules/node-pty/**/*
+  # 렌더러 의존성은 vite가 이미 번들에 넣었다. main이 이것들을 require하지
+  # 않는다는 것은 out/main/index.js의 require 목록으로 확인된다
+  - '!node_modules/react/**'
+  - '!node_modules/react-dom/**'
+  - '!node_modules/@xterm/**'
 
 # 네이티브 모듈은 asar 안에서 로드할 수 없다. conpty.dll과 OpenConsole.exe도
 # 실제 파일 경로로 존재해야 ConPTY가 뜬다.
