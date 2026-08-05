@@ -17,6 +17,7 @@ export const HELP = `cvmux - 제어 소켓으로 cvmux를 조종한다
   --socket <path>        파이프 경로를 직접 지정 (기본: CVMUX_SOCKET_PATH)
   --password <value>     소켓 비밀번호 (기본: CVMUX_SOCKET_PASSWORD)
   --json                 결과를 JSON으로 출력
+  --window <handle>      대상 창 (id, window:2, 또는 순번). 없으면 마지막으로 본 창
   --workspace <handle>   대상 워크스페이스 (id, workspace:2, 또는 순번)
   --pane <handle>        대상 pane
   --session <handle>     대상 세션 (기본: CVMUX_SESSION_ID)
@@ -28,6 +29,16 @@ export const HELP = `cvmux - 제어 소켓으로 cvmux를 조종한다
   rpc <method> [json]    메서드를 직접 호출
   events [옵션]          이벤트를 줄 단위 JSON으로 흘려보낸다
   focus                  창을 앞으로 가져온다
+
+창:
+  list-windows           창 목록
+  current-window         지금 보고 있는 창
+  new-window             창을 하나 더 연다
+  focus-window [handle]  그 창을 앞으로
+  close-window [handle]  그 창을 닫는다 (마지막 창은 닫지 않는다)
+  move-workspace-to-window <workspace> <window>
+                         워크스페이스를 다른 창으로 (세션은 그대로 산다).
+                         순번은 창마다 1부터 다시 세므로 id로 가리키는 편이 안전하다
 
 워크스페이스:
   list-workspaces        목록
@@ -141,6 +152,14 @@ const USAGE: Record<string, string> = {
   focus: 'Usage: cvmux focus',
   rpc: 'Usage: cvmux rpc <method> [json-params]',
   events: 'Usage: cvmux events [--after <seq>] [--name <event>] [--limit <n>]',
+  'list-windows': 'Usage: cvmux list-windows',
+  'current-window': 'Usage: cvmux current-window',
+  'new-window': 'Usage: cvmux new-window',
+  'focus-window': 'Usage: cvmux focus-window [<window>]',
+  'close-window': 'Usage: cvmux close-window [<window>]',
+  'move-workspace-to-window':
+    'Usage: cvmux move-workspace-to-window <workspace> <window>\n' +
+    '       cvmux move-workspace-to-window --workspace <handle> --to <window>',
   'list-workspaces': 'Usage: cvmux list-workspaces',
   'current-workspace': 'Usage: cvmux current-workspace',
   tree: 'Usage: cvmux tree',

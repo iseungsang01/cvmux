@@ -76,6 +76,13 @@ export interface CvmuxConfig {
  */
 export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   'workspace.new': 'Ctrl+Shift+N',
+  /*
+   * 새 창 (P27-3).
+   *
+   * 다른 앱이 `Ctrl+N`을 쓰는 자리다. 그 키는 PSReadLine이 쓰므로 `Alt`를
+   * 하나 얹었다 — `Ctrl+Shift+N`은 이미 새 세션이 가져갔다.
+   */
+  'window.new': 'Ctrl+Alt+N',
   'workspace.rename': 'Ctrl+Shift+E',
   'pane.close': 'Ctrl+Shift+W',
   /*

@@ -140,6 +140,8 @@ async function main(argv: string[]): Promise<number> {
 
   const endpoint = resolveEndpoint({ socket: str(flags, 'socket'), password: str(flags, 'password') })
   const client = new ControlClient(endpoint)
+  // `--window`는 전역이다 — 이 뒤의 모든 요청이 그 창으로 간다. P27-6
+  client.windowRef = str(flags, 'window')
   await client.connect()
 
   try {
@@ -361,6 +363,27 @@ async function run(
       })
       // 끊길 때까지 산다. 이 명령만은 응답을 찍고 끝나지 않는다
       return undefined
+    }
+
+    // ── 창 (P27) ───────────────────────────────────────────────
+    case 'list-windows':
+      return client.call(M.WINDOW_LIST)
+    case 'current-window':
+      return client.call(M.WINDOW_CURRENT)
+    case 'new-window':
+      return client.call(M.WINDOW_NEW)
+    case 'focus-window':
+      return client.call(M.WINDOW_FOCUS, { window: args[0] ?? str(flags, 'window') })
+    case 'close-window':
+      return client.call(M.WINDOW_CLOSE, { window: args[0] ?? str(flags, 'window') })
+
+    case 'move-workspace-to-window': {
+      // `move-workspace-to-window <workspace> <window>` 또는 `--workspace`/`--to`
+      const [first, second] = args
+      return client.call(M.WINDOW_MOVE_WORKSPACE, {
+        workspace: second === undefined ? (workspace ?? first) : first,
+        window: second ?? str(flags, 'to') ?? str(flags, 'window')
+      })
     }
 
     // ── 워크스페이스 ────────────────────────────────────────────

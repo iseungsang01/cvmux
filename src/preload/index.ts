@@ -10,12 +10,12 @@ import {
   type CreateSessionResult,
   type CvmuxApi,
   type Notification,
+  type RestoredLayout,
   type RightSidebarMode,
   type SessionExitInfo,
   type SessionMeta,
   type SessionSnapshot,
   type UpdateState,
-  type Workspace,
   type WorkspaceMeta
 } from '@shared/types'
 
@@ -40,6 +40,7 @@ function subscribe<A extends unknown[]>(
 }
 
 const api: CvmuxApi = {
+  newWindow: () => ipcRenderer.invoke(IPC.NEW_WINDOW) as Promise<string>,
   list: () => ipcRenderer.invoke(IPC.LIST) as Promise<SessionMeta[]>,
   snapshot: (id) => ipcRenderer.invoke(IPC.SNAPSHOT, id) as Promise<SessionSnapshot | null>,
   create: (options?: CreateSessionOptions) =>
@@ -54,7 +55,7 @@ const api: CvmuxApi = {
   readClipboard: () => ipcRenderer.invoke(IPC.READ_CLIPBOARD) as Promise<ClipboardContent>,
   writeClipboard: (text) => ipcRenderer.invoke(IPC.WRITE_CLIPBOARD, text) as Promise<boolean>,
   setActive: (id) => ipcRenderer.invoke(IPC.SET_ACTIVE, id) as Promise<boolean>,
-  loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<Workspace[]>,
+  loadLayout: () => ipcRenderer.invoke(IPC.LOAD_LAYOUT) as Promise<RestoredLayout>,
   saveLayout: (workspaces) => ipcRenderer.invoke(IPC.SAVE_LAYOUT, workspaces) as Promise<boolean>,
   controlReply: (id, ok, payload) =>
     ipcRenderer.invoke(IPC.CTL_REPLY, id, ok, payload) as Promise<boolean>,

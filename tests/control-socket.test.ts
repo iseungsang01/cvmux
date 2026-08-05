@@ -22,7 +22,7 @@ import type { BrowserManager } from '../src/main/browser'
 import type { UpdateManager } from '../src/main/updater'
 import type { PtyManager } from '../src/core/pty-manager'
 import type { SessionMeta, Workspace } from '../src/shared/types'
-import { ControlSocketServer, pipePathFor } from '../src/main/control-socket'
+import { ControlSocketServer, type WindowInfo, pipePathFor } from '../src/main/control-socket'
 
 const results: string[] = []
 let failed = 0
@@ -158,6 +158,15 @@ class TestClient {
   }
 }
 
+/** 창 라우팅과 상관없는 옛 응답들 — 이 테스트가 원래 보던 것 */
+function legacyBridge(method: string): Promise<unknown> {
+  if (method === 'workspace.list') return Promise.resolve({ workspaces: [] })
+  if (method === 'notification.open') {
+    return Promise.resolve({ workspace_id: 'ws-1', pane_id: 'pane-1' })
+  }
+  return Promise.reject(new Error('창이 없습니다'))
+}
+
 async function main(): Promise<void> {
   const manager = new FakeManager()
   // 테스트용 파이프 — 실제 앱과 겹치지 않게 다른 이름을 쓴다
@@ -181,16 +190,28 @@ async function main(): Promise<void> {
       focusedPaneId: 'pane-test'
     }
   ]
+  const windowList: WindowInfo[] = [
+    { id: 'win-a', current: true, focused: true, minimized: false, visible: true, workspaces: 1, title: 'cvmux' },
+    { id: 'win-b', current: false, focused: false, minimized: false, visible: true, workspaces: 0, title: 'cvmux' }
+  ]
+  /** 다리가 어느 창으로 갔는지 — `--window` 라우팅을 확인하는 데 쓴다 */
+  const bridgeCalls: { method: string; windowId: string | null }[] = []
+  /** 창 사이 이동에서 떼어 낸 것 (P27-7) */
+  let detachedWorkspace: unknown = null
+
   const server = new ControlSocketServer(
     {
       manager: manager as unknown as PtyManager,
       bridge: {
-        call: (method) =>
-          method === 'workspace.list'
-            ? Promise.resolve({ workspaces: [] })
-            : method === 'notification.open'
-              ? Promise.resolve({ workspace_id: 'ws-1', pane_id: 'pane-1' })
-              : Promise.reject(new Error('창이 없습니다'))
+        call: (method, _params, windowId = null) => {
+          bridgeCalls.push({ method, windowId })
+          if (method === 'workspace.detach') {
+            detachedWorkspace = { id: 'ws-test', title: null }
+            return Promise.resolve({ workspace: detachedWorkspace })
+          }
+          if (method === 'workspace.attach') return Promise.resolve({ attached: true })
+          return legacyBridge(method)
+        }
       },
       inbox,
       // 브라우저는 이 테스트의 대상이 아니다 — 목록이 비어 있는 것으로 충분하다
@@ -205,6 +226,45 @@ async function main(): Promise<void> {
       } as unknown as UpdateManager,
       showWindow: () => {
         focused++
+      },
+      /*
+       * 창 두 개 (P27).
+       *
+       * 하나만 두면 `--window` 라우팅이 "아무것도 안 해도 통과"한다. 두 개여야
+       * 요청이 실제로 어느 창으로 갔는지 확인할 수 있다.
+       */
+      windows: {
+        list: () => windowList,
+        create: () => {
+          const id = `win-new-${windowList.length}`
+          windowList.push({
+            id,
+            current: false,
+            focused: false,
+            minimized: false,
+            visible: true,
+            workspaces: 0,
+            title: 'cvmux'
+          })
+          return id
+        },
+        focus: (id) => {
+          const found = windowList.find((w) => w.id === id)
+          if (!found) return false
+          windowList.forEach((w) => {
+            w.current = w.id === id
+          })
+          return true
+        },
+        close: (id) => {
+          const before = windowList.length
+          const index = windowList.findIndex((w) => w.id === id)
+          if (index >= 0) windowList.splice(index, 1)
+          return windowList.length < before
+        },
+        current: () => windowList.find((w) => w.current)?.id ?? windowList[0]?.id ?? null,
+        has: (id) => windowList.some((w) => w.id === id),
+        ofWorkspace: (workspaceId) => (workspaceId === 'ws-test' ? 'win-a' : null)
       },
       reloadConfig: () => ({ config: DEFAULT_CONFIG, source: null, problems: [] }),
       version: '0.1.0-test'
@@ -494,6 +554,100 @@ async function main(): Promise<void> {
       (ack.result as { resume: { latestSeq: number } }).resume.latestSeq > 0
     )
     rewound.close()
+  }
+
+  /*
+   * 다중 창 (P27).
+   *
+   * 여기서 확인하는 것은 "요청이 **어느 창으로** 갔는가"다. 창이 하나뿐이던
+   * 시절에는 물을 필요조차 없던 질문이고, 틀려도 타입 검사에 걸리지 않는다.
+   */
+  {
+    const windows = await client.send(300, { method: 'window.list', auth: password })
+    const list = (windows.result as { windows: WindowInfo[] }).windows
+    check('창 목록', list.length === 2, String(list.length))
+
+    const current = await client.send(301, { method: 'window.current', auth: password })
+    check('지금 창', (current.result as WindowInfo).id === 'win-a')
+
+    // --window 없이 부르면 지금 보고 있는 창 — 다리에는 null이 간다
+    bridgeCalls.length = 0
+    await client.send(302, { method: 'workspace.list', auth: password, params: {} })
+    check('--window 없으면 지금 창', bridgeCalls.at(-1)?.windowId === null)
+
+    // --window를 주면 그 창으로 간다
+    await client.send(303, {
+      method: 'workspace.list',
+      auth: password,
+      params: { window: 'win-b' }
+    })
+    check('--window가 창을 고른다', bridgeCalls.at(-1)?.windowId === 'win-b')
+
+    // 순번(1부터)도 창 참조다. P20-4
+    await client.send(304, { method: 'workspace.list', auth: password, params: { window: '2' } })
+    check('순번으로도 창을 고른다', bridgeCalls.at(-1)?.windowId === 'win-b')
+
+    const missing = await client.send(305, {
+      method: 'workspace.list',
+      auth: password,
+      params: { window: 'win-nope' }
+    })
+    check(
+      '없는 창은 not_found',
+      (missing.error as { code: string } | undefined)?.code === 'not_found'
+    )
+
+    const made = await client.send(306, { method: 'window.new', auth: password })
+    check('새 창', typeof (made.result as { window_id: string }).window_id === 'string')
+
+    /*
+     * 워크스페이스를 다른 창으로 옮기면 떼기와 붙이기가 짝으로 간다 (P27-7).
+     *
+     * 하나만 가면 워크스페이스가 사라지거나 두 창에 겹쳐 뜬다.
+     */
+    bridgeCalls.length = 0
+    const moved = await client.send(307, {
+      method: 'window.move-workspace',
+      auth: password,
+      params: { workspace: 'ws-test', window: 'win-b' }
+    })
+    check('옮겼다', (moved.result as { moved: boolean }).moved === true)
+    check(
+      '떼기는 원래 창에서',
+      bridgeCalls[0]?.method === 'workspace.detach' && bridgeCalls[0]?.windowId === 'win-a'
+    )
+    check(
+      '붙이기는 받는 창에서',
+      bridgeCalls[1]?.method === 'workspace.attach' && bridgeCalls[1]?.windowId === 'win-b'
+    )
+    check('떼어 낸 것이 그대로 간다', detachedWorkspace !== null)
+
+    // 같은 창으로 옮기라고 하면 아무것도 하지 않는다
+    bridgeCalls.length = 0
+    const same = await client.send(308, {
+      method: 'window.move-workspace',
+      auth: password,
+      params: { workspace: 'ws-test', window: 'win-a' }
+    })
+    check('같은 창이면 그대로', (same.result as { moved: boolean }).moved === false)
+    check('다리를 부르지 않는다', bridgeCalls.length === 0)
+
+    /*
+     * 마지막 창은 소켓으로 닫지 못한다 (P27-8).
+     *
+     * 닫아 버리면 화면이 하나도 남지 않는다 — 스크립트는 자기가 앱을 숨겼다는
+     * 것도 모른 채 그 뒤의 명령을 계속 보낸다.
+     */
+    while (windowList.length > 1) windowList.pop()
+    const last = await client.send(309, {
+      method: 'window.close',
+      auth: password,
+      params: { window: 'win-a' }
+    })
+    check(
+      '마지막 창은 못 닫는다',
+      (last.error as { code: string } | undefined)?.code === 'invalid_state'
+    )
   }
 
   // ── 잘못된 프레임

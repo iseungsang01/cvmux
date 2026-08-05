@@ -1,4 +1,4 @@
-import { resolveHandle, M, type ControlErrorCode } from '@shared/protocol'
+import { resolveHandle, M, M_INTERNAL, type ControlErrorCode } from '@shared/protocol'
 import type { BrowserMeta, PaneNode, SessionMeta, Workspace } from '@shared/types'
 import { collectAllSurfaces, collectLeaves } from './layout'
 import { focusedSessionId, sessionIdOfPane, workspaceTitle } from './workspace'
@@ -45,6 +45,15 @@ export interface ControlContext {
   selectSurface(workspaceId: string, paneId: string, index: number): void
   /** 잎 하나를 트리에서 걷어낸다 — 브라우저를 소켓에서 닫았을 때. P23-2 */
   dropSurface(surfaceId: string): void
+  /**
+   * 워크스페이스를 이 창에서 떼어 낸다 (P27-7).
+   *
+   * `closeWorkspace`와 다르다 — 세션을 죽이지 않는다. 다른 창이 그대로 이어받기
+   * 때문이다.
+   */
+  detachWorkspace(workspaceId: string): void
+  /** 다른 창에서 온 워크스페이스를 이 창에 붙이고 그것을 고른다. P27-7 */
+  attachWorkspace(workspace: Workspace): void
   /** 오른쪽 사이드바를 열고 닫는다. P25-7 */
   setRightSidebar(open: boolean, mode?: 'log' | 'todo' | 'sessions' | 'find'): void
   /** 알림함·팔레트·찾기를 열고 닫는다. P21-11 */
@@ -110,6 +119,28 @@ export async function handleControl(
       const workspace = pickWorkspace(params, ctx)
       ctx.closeWorkspace(workspace.id)
       return { id: workspace.id, closed: true }
+    }
+
+    /*
+     * 창 사이 이동 (P27-7).
+     *
+     * 떼어 내기와 붙이기는 항상 짝으로 온다 — main이 `window.move-workspace`
+     * 하나에서 두 창의 렌더러를 차례로 부른다. 세션은 앱 전체가 들고 있으므로
+     * 화면만 건너가고 돌던 명령은 그대로 돈다.
+     */
+    case M_INTERNAL.WORKSPACE_DETACH: {
+      const workspace = pickWorkspace(params, ctx)
+      ctx.detachWorkspace(workspace.id)
+      return { workspace }
+    }
+
+    case M_INTERNAL.WORKSPACE_ATTACH: {
+      const incoming = params.workspace as Workspace | undefined
+      if (!incoming || typeof incoming !== 'object' || typeof incoming.id !== 'string') {
+        throw new ControlRequestError('붙일 워크스페이스가 없습니다', 'invalid_params')
+      }
+      ctx.attachWorkspace(incoming)
+      return { id: incoming.id, attached: true }
     }
 
     case M.WORKSPACE_RENAME: {

@@ -135,14 +135,26 @@ export class ControlClient {
     else waiting.reject(new CliError(`${response.error.message} (${response.error.code})`))
   }
 
+  /**
+   * 모든 요청에 실어 보낼 창 (P27-6).
+   *
+   * `--window`는 전역 플래그다 — 명령마다 손으로 끼워 넣게 하면 언젠가 하나를
+   * 빠뜨리고, 그러면 그 명령만 조용히 다른 창으로 간다.
+   */
+  windowRef: string | undefined = undefined
+
   call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     const socket = this.socket
     if (!socket) return Promise.reject(new CliError('연결되지 않았습니다'))
 
     const id = this.nextId++
+    const body =
+      this.windowRef !== undefined && params.window === undefined
+        ? { ...params, window: this.windowRef }
+        : params
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      socket.write(`${JSON.stringify({ id, method, params, auth: this.endpoint.password })}\n`)
+      socket.write(`${JSON.stringify({ id, method, params: body, auth: this.endpoint.password })}\n`)
     })
   }
 

@@ -100,6 +100,25 @@ export interface ControlEndpoint {
   startedAt: number
 }
 
+/**
+ * 워크스페이스를 창 사이로 옮길 때 렌더러에 넘기는 것 (P27-7).
+ *
+ * 보내는 쪽 렌더러가 워크스페이스 전체를 떼어 내고, 받는 쪽 렌더러가 그것을
+ * 그대로 붙인다. 세션은 앱 전체가 들고 있으므로 옮겨도 죽지 않는다(P27-1).
+ */
+export const M_INTERNAL = {
+  WORKSPACE_DETACH: 'workspace.detach',
+  WORKSPACE_ATTACH: 'workspace.attach'
+} as const
+
+/*
+ * 이 둘은 `RENDERER_METHODS`에 넣지 않는다.
+ *
+ * 그 집합은 "소켓이 부르면 렌더러로 넘긴다"는 뜻이다. 떼어 내기를 밖에서 직접
+ * 부를 수 있으면 워크스페이스를 어디에도 붙이지 않은 채 잃어버릴 수 있다 —
+ * 항상 `window.move-workspace` 한 번으로 짝을 지어 부른다.
+ */
+
 /** 세션·워크스페이스·pane을 가리키는 방법. P20-4 */
 export interface HandleRef {
   /** `workspace:2` 같은 참조, UUID, 또는 1부터 세는 순번 문자열 */
@@ -219,6 +238,19 @@ export const M = {
   UPDATE_STATE: 'update.state',
   UPDATE_CHECK: 'update.check',
   UPDATE_INSTALL: 'update.install',
+
+  /**
+   * 다중 창 (P27). 이름은 cmux의 `window …` 하위 명령을 그대로 따른다.
+   *
+   * 창은 앱이 들고 있다 — 렌더러에 물을 것이 없다. 다만 워크스페이스를 창
+   * 사이로 옮기는 것만은 양쪽 렌더러가 함께 움직여야 한다(P27-7).
+   */
+  WINDOW_LIST: 'window.list',
+  WINDOW_NEW: 'window.new',
+  WINDOW_FOCUS: 'window.focus',
+  WINDOW_CLOSE: 'window.close',
+  WINDOW_CURRENT: 'window.current',
+  WINDOW_MOVE_WORKSPACE: 'window.move-workspace',
 
   APP_OPEN: 'app.open',
   APP_FOCUS: 'app.focus',

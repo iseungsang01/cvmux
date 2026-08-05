@@ -12,6 +12,12 @@ export function render(command: string, result: unknown, json: boolean): string 
 
   const value = result as Row
   switch (command) {
+    case 'list-windows':
+      return table(rows(value.windows), ['id', 'current', 'workspaces', 'visible', 'minimized'])
+
+    case 'current-window':
+      return pairs(value, ['id', 'workspaces', 'focused', 'visible'])
+
     case 'list-workspaces':
       return table(rows(value.workspaces), ['ref', 'title', 'status', 'branch', 'cwd'])
 

@@ -17,13 +17,16 @@ import { normalizeUrl } from '@shared/url'
  */
 
 export interface BrowserHost {
-  window(): BrowserWindow | null
+  /** 이 화면이 얹힐 창. 창 id를 모르면 지금 보고 있는 창. P27-4 */
+  window(windowId: string | null): BrowserWindow | null
   /** 페이지 상태가 바뀌었다 — 주소창과 사이드바가 따라와야 한다 */
   onChange(meta: BrowserMeta): void
 }
 
 interface Surface {
   id: string
+  /** 어느 창에 얹혔는가. 창이 여럿이면 다른 창 위에 그리면 안 된다. P27-4 */
+  windowId: string | null
   view: WebContentsView
   /** 렌더러가 알려준 자리. 보이지 않으면 null */
   rect: BrowserRect | null
@@ -35,7 +38,7 @@ export class BrowserManager {
 
   constructor(private readonly host: BrowserHost) {}
 
-  create(url: string): BrowserMeta {
+  create(url: string, windowId: string | null = null): BrowserMeta {
     const id = `br-${randomUUID()}`
     const view = new WebContentsView({
       webPreferences: {
@@ -56,7 +59,7 @@ export class BrowserManager {
       }
     })
 
-    const surface: Surface = { id, view, rect: null, attached: false }
+    const surface: Surface = { id, windowId, view, rect: null, attached: false }
     this.surfaces.set(id, surface)
 
     const contents = view.webContents
@@ -92,12 +95,27 @@ export class BrowserManager {
    * 알려 주면 여기서 그대로 얹는다. 사각형이 없으면(다른 워크스페이스에 있거나
    * 접혀 있으면) 창에서 떼어 낸다 — 떼지 않으면 다른 화면 위에 그대로 떠 있다.
    */
-  place(id: string, rect: BrowserRect | null): void {
+  place(id: string, rect: BrowserRect | null, windowId: string | null = null): void {
     const surface = this.surfaces.get(id)
     if (!surface) return
     surface.rect = rect
 
-    const win = this.host.window()
+    /*
+     * 창이 바뀌었으면 먼저 떼어 낸다 (P27-4).
+     *
+     * 워크스페이스가 다른 창으로 건너간 경우다. 옛 창에서 떼지 않으면 그쪽에
+     * 그대로 떠 있는 채로 새 창에도 하나 더 뜬다.
+     */
+    if (windowId !== null && windowId !== surface.windowId) {
+      const old = this.host.window(surface.windowId)
+      if (surface.attached && old && !old.isDestroyed()) {
+        old.contentView.removeChildView(surface.view)
+      }
+      surface.attached = false
+      surface.windowId = windowId
+    }
+
+    const win = this.host.window(surface.windowId)
     if (!win || win.isDestroyed()) return
 
     if (rect === null || rect.width <= 0 || rect.height <= 0) {
@@ -125,7 +143,7 @@ export class BrowserManager {
     if (!surface) return false
     this.surfaces.delete(id)
 
-    const win = this.host.window()
+    const win = this.host.window(surface.windowId)
     if (surface.attached && win && !win.isDestroyed()) {
       win.contentView.removeChildView(surface.view)
     }

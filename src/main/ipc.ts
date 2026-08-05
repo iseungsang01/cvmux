@@ -3,6 +3,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain } from 'electron'
 import type { NotificationStore } from '@core/notifications'
 import type { WorkspaceMetaStore } from '@core/workspace-meta'
 import type { UpdateManager } from './updater'
+import type { WindowRegistry } from './windows'
 import type { PtyManager } from '@core/pty-manager'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
@@ -19,10 +20,15 @@ import type { BrowserManager } from './browser'
 import { BridgeError, type ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
 
-/** pane 배치를 어디서 읽고 어디에 저장할지는 호출자(main/index.ts)가 결정한다. P17 */
+/**
+ * pane 배치를 어디서 읽고 어디에 저장할지는 호출자(main/index.ts)가 결정한다. P17
+ *
+ * 배치는 **창마다 따로**다(P27-5). 어느 창인지는 IPC 핸들러가 `event.sender`로
+ * 되짚는다 — 렌더러가 자기 id를 실어 보내게 하면 위조할 수 있는 값이 하나 는다.
+ */
 export interface LayoutStore {
-  load(): Workspace[]
-  save(workspaces: Workspace[]): void
+  load(windowId: string): Workspace[]
+  save(windowId: string, workspaces: Workspace[]): void
 }
 
 /**
@@ -39,8 +45,16 @@ class RendererBridge implements ControlBridge {
     { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
   >()
 
-  call(method: string, params: Record<string, unknown>): Promise<unknown> {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+  constructor(private readonly windows: WindowRegistry) {}
+
+  call(
+    method: string,
+    params: Record<string, unknown>,
+    windowId: string | null = null
+  ): Promise<unknown> {
+    // `--window`가 창을 짚으면 그 창, 아니면 지금 보고 있는 창. P27-6
+    const entry = windowId === null ? this.windows.current() : this.windows.get(windowId)
+    const win = entry && !entry.win.isDestroyed() ? entry.win : null
     if (!win || win.webContents.isDestroyed()) {
       return Promise.reject(new Error('창이 없습니다. cvmux 창을 먼저 여세요'))
     }
@@ -95,9 +109,10 @@ export function registerIpc(
   config: () => CvmuxConfig,
   browsers: BrowserManager,
   meta: WorkspaceMetaStore,
-  updater: UpdateManager
+  updater: UpdateManager,
+  windows: WindowRegistry
 ): ControlBridge {
-  const bridge = new RendererBridge()
+  const bridge = new RendererBridge(windows)
 
   ipcMain.handle(IPC.CONFIG, () => config())
 
@@ -137,13 +152,27 @@ export function registerIpc(
   )
 
   // ── 내장 브라우저 (P23) ──────────────────────────────────────
-  ipcMain.handle(IPC.BROWSER_CREATE, (_event, url: unknown) =>
-    browsers.create(typeof url === 'string' ? url : 'about:blank')
+  ipcMain.handle(IPC.BROWSER_CREATE, (event, url: unknown) =>
+    // 브라우저 화면은 그것을 띄운 창에 얹힌다. P27-4
+    browsers.create(
+      typeof url === 'string' ? url : 'about:blank',
+      windows.ofWebContents(event.sender.id)?.id ?? null
+    )
   )
 
-  ipcMain.handle(IPC.BROWSER_PLACE, (_event, id: unknown, rect: unknown) => {
+  ipcMain.handle(IPC.BROWSER_PLACE, (event, id: unknown, rect: unknown) => {
     if (typeof id !== 'string') return false
-    browsers.place(id, rect === null ? null : (rect as BrowserRect))
+    /*
+     * 자리를 알려 준 창이 곧 그 화면이 얹힐 창이다 (P27-4).
+     *
+     * 워크스페이스가 다른 창으로 건너가면 브라우저도 따라가야 한다. 새 창의
+     * 렌더러가 자리를 알려 주는 순간이 그 신호다 — 따로 옮기라고 말할 필요가 없다.
+     */
+    browsers.place(
+      id,
+      rect === null ? null : (rect as BrowserRect),
+      windows.ofWebContents(event.sender.id)?.id ?? null
+    )
     return true
   })
 
@@ -196,7 +225,6 @@ export function registerIpc(
 
   // 명시적 알림(OSC 9/777/99/BEL)을 받으면 알림함에 쌓고 토스트도 띄운다. P15-1 / P21-1
   manager.on('notify', (id, text) => {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
     const title = manager.metaOf(id)?.title ?? ''
     inbox.add(id, title || '세션', text)
     notifier.notify({
@@ -204,8 +232,14 @@ export function registerIpc(
       sessionTitle: title || '세션',
       text,
       isActiveSession: id === activeSessionId,
-      // 창이 없거나 숨겨져 있으면 포커스된 것이 아니다 — 트레이에 있을 때도 알려야 한다. P18-2
-      windowFocused: win?.isVisible() === true && win.isFocused()
+      /*
+       * 창이 없거나 숨겨져 있으면 포커스된 것이 아니다 — 트레이에 있을 때도
+       * 알려야 한다(P18-2). 창이 여럿이면 **아무 창이든** 앞에 있으면 된다:
+       * 사람이 cvmux를 보고 있다는 뜻이므로 토스트를 아낄 수 있다.
+       */
+      windowFocused: BrowserWindow.getAllWindows().some(
+        (w) => !w.isDestroyed() && w.isVisible() && w.isFocused()
+      )
     })
   })
 
@@ -221,11 +255,35 @@ export function registerIpc(
     return true
   })
 
-  ipcMain.handle(IPC.LOAD_LAYOUT, () => layout.load())
+  // 새 창 (P27-3). 만드는 것은 index.ts가 안다 — 여기서는 신호만 보낸다
+  ipcMain.handle(IPC.NEW_WINDOW, () => windows.spawn())
 
-  ipcMain.handle(IPC.SAVE_LAYOUT, (_event, workspaces: unknown) => {
+  ipcMain.handle(IPC.LOAD_LAYOUT, (event) => {
+    const entry = windows.ofWebContents(event.sender.id)
+    if (!entry) return { workspaces: [], orphanSessions: [] }
+
+    /*
+     * 떠도는 세션은 **첫 창**이 맡는다 (P27-5).
+     *
+     * 어느 창도 보여주지 않는 세션만 여기 담는다. 창이 자기 배치만 보고
+     * 판단하면 옆 창이 이미 보여주는 세션을 떠돈다고 착각해 같은 세션이 두
+     * 창에 겹쳐 뜬다 — 그래서 main이 전체를 보고 정한다.
+     */
+    const shown = new Set(windows.allWorkspaces().flatMap(sessionIdsOf))
+    return {
+      workspaces: layout.load(entry.id),
+      orphanSessions:
+        windows.first()?.id === entry.id
+          ? manager.list().map((s) => s.id).filter((id) => !shown.has(id))
+          : []
+    }
+  })
+
+  ipcMain.handle(IPC.SAVE_LAYOUT, (event, workspaces: unknown) => {
     if (!Array.isArray(workspaces)) return false
-    layout.save(workspaces as Workspace[])
+    const entry = windows.ofWebContents(event.sender.id)
+    if (!entry) return false
+    layout.save(entry.id, workspaces as Workspace[])
     return true
   })
 
@@ -342,4 +400,18 @@ export function registerIpc(
   })
 
   return bridge
+}
+
+/** 워크스페이스가 품은 세션 전부. 숨은 탭까지 본다(P24-4) */
+function sessionIdsOf(workspace: Workspace): string[] {
+  const out: string[] = []
+  const walk = (node: Workspace['root']): void => {
+    if (node.kind === 'leaf') {
+      out.push(...node.surfaces)
+      return
+    }
+    node.children.forEach(walk)
+  }
+  walk(workspace.root)
+  return out
 }

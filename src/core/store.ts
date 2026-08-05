@@ -56,11 +56,27 @@ export interface PersistedWorkspace {
   focusedIndex: number
 }
 
+/**
+ * 창 하나가 저장하는 것 (P27-5).
+ *
+ * 세션은 앱 전체가 하나로 들고 있으므로 창에는 배치만 남는다. 창이 여럿이면
+ * 각자의 자리가 따로 복원되어야 모니터 배치가 되살아난다.
+ */
+export interface PersistedWindow {
+  workspaces: PersistedWorkspace[]
+}
+
 export interface PersistedState {
-  version: 3
+  version: 4
   savedAt: number
   sessions: PersistedSession[]
-  workspaces: PersistedWorkspace[]
+  /**
+   * 창별 배치 (P27-5).
+   *
+   * version 3까지는 창이 하나뿐이라 `workspaces` 하나로 충분했다. 옛 파일을
+   * 읽을 때는 그것을 창 하나짜리 목록으로 옮긴다.
+   */
+  windows: PersistedWindow[]
   /**
    * 알림함 (P21-8).
    *
@@ -131,6 +147,7 @@ export class SessionStore {
       savedAt?: unknown
       sessions?: unknown
       workspaces?: unknown
+      windows?: unknown
       notifications?: unknown
     }
     /*
@@ -140,7 +157,7 @@ export class SessionStore {
      * 그만이고, 있는 것은 살린다 — 앱을 갱신했다고 열어 둔 세션이 사라지면
      * 그건 복원이 아니다(P16).
      */
-    if (state.version !== 1 && state.version !== 2 && state.version !== 3) return null
+    if (![1, 2, 3, 4].includes(state.version as number)) return null
     if (!Array.isArray(state.sessions)) return null
 
     const sessions: PersistedSession[] = []
@@ -160,18 +177,35 @@ export class SessionStore {
     const kept = sessions.slice(-POLICY.MAX_SESSIONS)
     const dropped = sessions.length - kept.length
 
-    const rawWorkspaces = Array.isArray(state.workspaces) ? state.workspaces : []
-    const workspaces: PersistedWorkspace[] = []
-    for (const entry of rawWorkspaces) {
-      const parsed = parseWorkspace(entry, kept.length, dropped)
-      if (parsed) workspaces.push(parsed)
+    /*
+     * 창별 배치 (P27-5).
+     *
+     * version 3까지는 최상위 `workspaces` 하나뿐이었다. 그때 파일은 창 하나에
+     * 전부 들어 있던 것이므로 그대로 창 하나로 옮긴다 — 앱을 갱신했다고 열어
+     * 둔 배치가 사라지면 그건 복원이 아니다(P16).
+     */
+    const rawWindows = Array.isArray(state.windows)
+      ? state.windows
+      : [{ workspaces: Array.isArray(state.workspaces) ? state.workspaces : [] }]
+
+    const windows: PersistedWindow[] = []
+    for (const rawWindow of rawWindows) {
+      if (typeof rawWindow !== 'object' || rawWindow === null) continue
+      const list = (rawWindow as { workspaces?: unknown }).workspaces
+      const workspaces: PersistedWorkspace[] = []
+      for (const entry of Array.isArray(list) ? list : []) {
+        const parsed = parseWorkspace(entry, kept.length, dropped)
+        if (parsed) workspaces.push(parsed)
+      }
+      // 빈 창은 복원하지 않는다 — 아무것도 없는 창이 뜨면 닫는 일만 생긴다
+      if (workspaces.length > 0) windows.push({ workspaces })
     }
 
     return {
-      version: 3,
+      version: 4,
       savedAt: typeof state.savedAt === 'number' ? state.savedAt : 0,
       sessions: kept,
-      workspaces,
+      windows,
       notifications: parseNotifications(state.notifications)
     }
   }

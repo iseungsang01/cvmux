@@ -24,6 +24,7 @@ import {
   CONTROL_PROTOCOL_VERSION,
   EV,
   M,
+  M_INTERNAL,
   RENDERER_METHODS,
   resolveHandle,
   type ControlEndpoint,
@@ -41,8 +42,13 @@ import type { Notification, SessionMeta, TodoItem, Workspace } from '@shared/typ
  */
 
 export interface ControlBridge {
-  /** 렌더러에 요청을 넘기고 답을 기다린다. 창이 없으면 거부한다 */
-  call(method: string, params: Record<string, unknown>): Promise<unknown>
+  /**
+   * 렌더러에 요청을 넘기고 답을 기다린다. 창이 없으면 거부한다.
+   *
+   * `windowId`를 주면 **그 창의** 렌더러에게 묻는다(P27-6). 주지 않으면 지금
+   * 보고 있는 창이다 — 창이 하나뿐이던 시절의 동작 그대로다.
+   */
+  call(method: string, params: Record<string, unknown>, windowId?: string | null): Promise<unknown>
 }
 
 /**
@@ -77,7 +83,41 @@ export interface ControlHost {
   reloadConfig(): ConfigSnapshot
   /** 자동 업데이트. P26 */
   updater: UpdateManager
+  /** 창들. P27 */
+  windows: WindowControl
   version: string
+}
+
+/** 창 하나의 겉모습 — `cvmux window list`가 보여 주는 것 */
+export interface WindowInfo {
+  id: string
+  /** 마지막으로 포커스된 창인가 */
+  current: boolean
+  focused: boolean
+  minimized: boolean
+  visible: boolean
+  workspaces: number
+  title: string
+}
+
+/**
+ * 창 조작 (P27-3).
+ *
+ * `WindowRegistry`를 그대로 받지 않고 좁은 인터페이스로 받는다 — 이 파일은
+ * Electron에 기대지 않아야 테스트가 그대로 불러 쓸 수 있기 때문이다(P20-8과
+ * 같은 이유).
+ */
+export interface WindowControl {
+  list(): WindowInfo[]
+  /** 새 창을 띄우고 그 id를 돌려준다 */
+  create(): string
+  focus(id: string): boolean
+  close(id: string): boolean
+  /** 지금 기준이 되는 창. 창이 하나도 없으면 null */
+  current(): string | null
+  has(id: string): boolean
+  /** 워크스페이스가 지금 어느 창에 있는가 */
+  ofWorkspace(workspaceId: string): string | null
 }
 
 class ControlError extends Error {
@@ -293,8 +333,15 @@ export class ControlSocketServer {
     params: Record<string, unknown>,
     id: number
   ): Promise<unknown> {
-    // 렌더러가 들고 있는 상태는 렌더러에게 묻는다. P20-7
-    if (RENDERER_METHODS.has(method)) return this.host.bridge.call(method, params)
+    /*
+     * 렌더러가 들고 있는 상태는 렌더러에게 묻는다 (P20-7).
+     *
+     * 어느 창의 렌더러인지는 `--window`가 정한다(P27-6). 없으면 지금 보고 있는
+     * 창이다 — 스크립트 대부분은 창을 하나만 쓰므로 그때는 아무것도 달라지지 않는다.
+     */
+    if (RENDERER_METHODS.has(method)) {
+      return this.host.bridge.call(method, params, this.targetWindow(params))
+    }
 
     switch (method) {
       case M.PING:
@@ -666,6 +713,90 @@ export class ControlSocketServer {
         this.host.showWindow()
         return { focused: true }
 
+      // ── 다중 창 (P27) ───────────────────────────────────────
+      case M.WINDOW_LIST:
+        return { windows: this.host.windows.list() }
+
+      case M.WINDOW_CURRENT: {
+        const id = this.host.windows.current()
+        if (id === null) throw new ControlError('not_found', '열린 창이 없습니다')
+        return this.host.windows.list().find((w) => w.id === id) ?? { id }
+      }
+
+      case M.WINDOW_NEW:
+        return { window_id: this.host.windows.create() }
+
+      case M.WINDOW_FOCUS: {
+        const id = this.requireWindow(params.window)
+        this.host.windows.focus(id)
+        return { window_id: id, focused: true }
+      }
+
+      case M.WINDOW_CLOSE: {
+        const id = this.requireWindow(params.window)
+        /*
+         * 마지막 창은 소켓으로 닫지 못한다 (P27-8).
+         *
+         * 닫아 버리면 화면이 하나도 남지 않는다 — 그때부터는 트레이 말고는
+         * 되살릴 길이 없고, 스크립트는 자기가 앱을 숨겼다는 것도 모른다.
+         * 앱을 정말 끄려는 것이라면 그것은 다른 명령이어야 한다.
+         */
+        if (this.host.windows.list().length <= 1) {
+          throw new ControlError('invalid_state', '마지막 창은 닫을 수 없습니다')
+        }
+        return { window_id: id, closed: this.host.windows.close(id) }
+      }
+
+      /*
+       * 워크스페이스를 다른 창으로 옮긴다 (P27-7).
+       *
+       * 보내는 쪽에서 떼어 내고 받는 쪽에 붙인다. 세션은 앱 전체가 들고 있으므로
+       * 옮겨도 죽지 않는다 — 화면만 다른 창으로 건너간다.
+       */
+      case M.WINDOW_MOVE_WORKSPACE: {
+        const target = this.requireWindow(params.window ?? params.to)
+        const handle = String(params.workspace ?? '')
+        if (handle === '') throw new ControlError('invalid_params', '옮길 워크스페이스를 지정하세요')
+
+        /*
+         * 참조는 **여기서** 푼다 (P27-7).
+         *
+         * 순번은 창마다 1부터 다시 세므로, 푼 뒤의 id를 넘겨야 한다. 보내는 쪽
+         * 렌더러에게 `workspace:2`를 그대로 넘기면 그 창의 두 번째를 찾다가
+         * 없다고 답한다 — 옮기려던 것과 다른 워크스페이스를 떼어 낼 수도 있다.
+         */
+        const workspaceId = resolveHandle(this.host.layout(), handle, 'workspace')?.id ?? handle
+        const source = this.host.windows.ofWorkspace(workspaceId)
+        if (source === null) {
+          throw new ControlError('not_found', `그런 워크스페이스가 없습니다: ${handle}`)
+        }
+        if (source === target) return { window_id: target, moved: false }
+
+        const detached = (await this.host.bridge.call(
+          M_INTERNAL.WORKSPACE_DETACH,
+          { workspace: workspaceId },
+          source
+        )) as { workspace?: unknown }
+        if (!detached?.workspace) {
+          throw new ControlError('not_found', `그런 워크스페이스가 없습니다: ${handle}`)
+        }
+
+        try {
+          await this.host.bridge.call(
+            M_INTERNAL.WORKSPACE_ATTACH,
+            { workspace: detached.workspace },
+            target
+          )
+        } catch (error) {
+          // 붙이지 못했으면 원래 창에 되돌린다 — 워크스페이스를 잃어버리지 않는다
+          await this.host.bridge
+            .call(M_INTERNAL.WORKSPACE_ATTACH, { workspace: detached.workspace }, source)
+            .catch(() => undefined)
+          throw error
+        }
+        return { window_id: target, moved: true }
+      }
+
       // 설정 다시 읽기 (P22-6). 파일 감시가 놓쳤을 때의 손잡이다
       case M.CONFIG_RELOAD: {
         const snapshot = this.host.reloadConfig()
@@ -682,6 +813,29 @@ export class ControlSocketServer {
       default:
         throw new ControlError('unknown_method', `모르는 메서드: ${method}`)
     }
+  }
+
+  /**
+   * `--window`가 가리키는 창 (P27-6).
+   *
+   * 값이 없으면 null — 다리가 알아서 지금 보고 있는 창을 고른다.
+   */
+  private targetWindow(params: Record<string, unknown>): string | null {
+    if (params.window === undefined || params.window === null || params.window === '') return null
+    return this.requireWindow(params.window)
+  }
+
+  /** 창 참조를 실제 id로 푼다. 순번(`1`)과 짧게 줄인 id도 받는다. P20-4 */
+  private requireWindow(raw: unknown): string {
+    const handle = String(raw ?? '')
+    if (handle === '') {
+      const current = this.host.windows.current()
+      if (current === null) throw new ControlError('not_found', '열린 창이 없습니다')
+      return current
+    }
+    const found = resolveHandle(this.host.windows.list(), handle, 'window')
+    if (!found) throw new ControlError('not_found', `그런 창이 없습니다: ${handle}`)
+    return found.id
   }
 
   /**

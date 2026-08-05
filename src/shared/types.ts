@@ -268,6 +268,8 @@ export const IPC = {
   /** pane 배치 저장/복원. P16 / P17 */
   LOAD_LAYOUT: 'layout:load',
   SAVE_LAYOUT: 'layout:save',
+  /** 새 창. P27-3 */
+  NEW_WINDOW: 'window:new',
   /** 제어 소켓 요청에 대한 렌더러의 답. P20-7 */
   CTL_REPLY: 'ctl:reply',
   /** 설정. P22 */
@@ -350,7 +352,24 @@ export interface Notification {
 }
 
 /** preload가 contextBridge로 노출하는 화이트리스트 API. P9-2 */
+/**
+ * 창이 뜰 때 받아 가는 것 (P27-5).
+ *
+ * 배치는 창마다 다르다. `orphanSessions`는 "어느 창도 보여주지 않으니 네가
+ * 맡아라"는 뜻이고, **첫 창에만** 채워 보낸다 — 창이 여럿일 때 모두가 맡으면
+ * 같은 세션이 여러 창에 겹쳐 뜬다.
+ *
+ * 떠도는지 아닌지는 main이 정한다. 창은 자기 배치만 알아서, 옆 창이 이미
+ * 보여주고 있는 세션을 떠돈다고 착각한다.
+ */
+export interface RestoredLayout {
+  workspaces: Workspace[]
+  orphanSessions: string[]
+}
+
 export interface CvmuxApi {
+  /** 새 창을 띄운다. P27-3 */
+  newWindow(): Promise<string>
   list(): Promise<SessionMeta[]>
   snapshot(id: string): Promise<SessionSnapshot | null>
   create(options?: CreateSessionOptions): Promise<CreateSessionResult>
@@ -366,7 +385,7 @@ export interface CvmuxApi {
   writeClipboard(text: string): Promise<boolean>
   setActive(id: string | null): Promise<boolean>
   /** 저장된 pane 배치. 세션이 사라졌으면 그 워크스페이스는 걸러진다. P17 */
-  loadLayout(): Promise<Workspace[]>
+  loadLayout(): Promise<RestoredLayout>
   saveLayout(workspaces: Workspace[]): Promise<boolean>
   /** 제어 소켓 요청에 답한다. 오류면 ok=false에 사유 문자열. P20-7 */
   controlReply(id: number, ok: boolean, payload: unknown): Promise<boolean>

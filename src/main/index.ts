@@ -12,7 +12,8 @@ import { SessionStore, workspacesFromPersisted, workspacesToPersisted } from '@c
 import { POLICY } from '@shared/policy'
 import { IPC, type Workspace } from '@shared/types'
 import { BrowserManager } from './browser'
-import { ControlSocketServer, pipePathFor } from './control-socket'
+import { ControlSocketServer, type WindowControl, pipePathFor } from './control-socket'
+import { WindowRegistry } from './windows'
 import { UpdateManager } from './updater'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
@@ -35,23 +36,36 @@ const manager = new PtyManager({
 
 /** 토스트를 클릭하면 창을 깨우고 그 세션으로 전환한다. P15-5 / P18-2 */
 const notifier = new Notifier((sessionId) => {
-  showWindow()
-  const win = mainWindow
-  if (!win || win.isDestroyed()) return
-  win.webContents.send(IPC.EVT_ACTIVATE, sessionId)
+  // 그 세션이 있는 창을 깨운다 — 창이 여럿이면 아무 창이나 띄우면 안 된다. P27-4
+  const target = windows.ofSession(sessionId) ?? windows.current()
+  if (!target || target.win.isDestroyed()) {
+    showWindow()
+    return
+  }
+  reveal(target.win)
+  target.win.webContents.send(IPC.EVT_ACTIVATE, sessionId)
 })
 
-let mainWindow: BrowserWindow | null = null
+/**
+ * 창 레지스트리 (P27).
+ *
+ * `mainWindow` 하나로는 창을 여럿 띄울 수 없다. 세션은 여전히 앱 전체가 하나로
+ * 들고 있고, 창이 갖는 것은 배치뿐이다.
+ */
+const windows = new WindowRegistry()
 let tray: TrayController | null = null
 let store: SessionStore | null = null
 let control: ControlSocketServer | null = null
 let persistTimer: NodeJS.Timeout | null = null
 let persistDebounce: NodeJS.Timeout | null = null
 
-/** 앱 시작 시 복원한 pane 배치. 렌더러가 한 번 가져간다 */
-let restoredLayout: Workspace[] = []
-/** 렌더러가 마지막으로 알려준 배치 — 저장 대상 */
-let currentLayout: Workspace[] = []
+/**
+ * 앱 시작 시 복원한 창별 배치 (P27-5).
+ *
+ * 창이 뜨는 순서대로 하나씩 가져간다 — 렌더러는 자기가 몇 번째 창인지 모르고,
+ * 알 필요도 없다.
+ */
+let restoredWindows: Workspace[][] = []
 
 /**
  * 알림함 (P21).
@@ -113,7 +127,9 @@ const updater = new UpdateManager({
  * 렌더러가 알려 준다(P23-2).
  */
 const browsers = new BrowserManager({
-  window: () => mainWindow,
+  // 브라우저 화면은 자기를 띄운 창에 얹힌다. P27-4
+  window: (windowId) =>
+    (windowId === null ? windows.current() : windows.get(windowId))?.win ?? null,
   onChange: (meta) => broadcast(IPC.EVT_BROWSER, meta)
 })
 
@@ -141,11 +157,13 @@ function persistNow(): void {
   agentSessions.prune(order)
 
   store.save({
-    version: 3,
+    version: 4,
     savedAt: Date.now(),
     sessions,
     // 세션을 순번으로 가리키므로 serialize()와 같은 순서를 넘겨야 한다
-    workspaces: workspacesToPersisted(currentLayout, manager.sessionOrder()),
+    windows: windows.list().map((entry) => ({
+      workspaces: workspacesToPersisted(entry.layout, order)
+    })),
     notifications: inbox.serialize()
   })
 }
@@ -187,14 +205,56 @@ function conPtySupported(): boolean {
  * 트레이 클릭, 토스트 클릭, 두 번째 인스턴스 실행이 모두 이 길로 온다 —
  * 창을 깨우는 방법이 세 군데로 갈라지면 하나가 조용히 어긋난다.
  */
+/**
+ * 소켓이 보는 창 (P27-3).
+ *
+ * `WindowRegistry`를 그대로 넘기지 않고 좁혀서 넘긴다 — 소켓 서버는 Electron을
+ * 모르는 채로 있어야 테스트가 그대로 불러 쓸 수 있다.
+ */
+function windowControl(): WindowControl {
+  return {
+    list: () =>
+      windows.list().map((entry) => ({
+        id: entry.id,
+        current: windows.current()?.id === entry.id,
+        focused: entry.win.isFocused(),
+        minimized: entry.win.isMinimized(),
+        visible: entry.win.isVisible(),
+        workspaces: entry.layout.length,
+        title: entry.win.getTitle()
+      })),
+    create: () => windows.spawn(),
+    focus: (id) => {
+      const entry = windows.get(id)
+      if (!entry || entry.win.isDestroyed()) return false
+      reveal(entry.win)
+      return true
+    },
+    close: (id) => {
+      const entry = windows.get(id)
+      if (!entry || entry.win.isDestroyed()) return false
+      entry.win.close()
+      return true
+    },
+    current: () => windows.current()?.id ?? null,
+    has: (id) => windows.get(id) !== null,
+    ofWorkspace: (workspaceId) => windows.ofWorkspace(workspaceId)?.id ?? null
+  }
+}
+
 function showWindow(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  const entry = windows.current()
+  if (!entry || entry.win.isDestroyed()) {
     createWindow()
     return
   }
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
+  reveal(entry.win)
+}
+
+function reveal(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
 }
 
 /** 실행 중인 세션을 죽여도 되는지 묻는다. P10-1 */
@@ -229,7 +289,7 @@ function requestQuit(): void {
   }
 
   showWindow()
-  void confirmQuit(busy, mainWindow).then((ok) => {
+  void confirmQuit(busy, windows.current()?.win ?? null).then((ok) => {
     if (!ok) return
     quitting = true
     app.quit()
@@ -266,7 +326,9 @@ async function confirmInstall(): Promise<void> {
   updater.install()
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
+  const pending = restoredWindows.shift() ?? []
+
   const win = new BrowserWindow({
     width: 1360,
     height: 860,
@@ -291,7 +353,14 @@ function createWindow(): void {
     }
   })
 
-  mainWindow = win
+  /*
+   * 창은 여기서 이름을 얻는다 (P27-2).
+   *
+   * 렌더러에게는 알려 주지 않는다 — 어느 창이 보낸 요청인지는 main이
+   * `event.sender`로 되짚는다. 렌더러가 실어 보내게 하면 위조할 수 있는 값이
+   * 하나 늘고, 그것으로 다른 창의 배치를 덮어쓸 수 있다.
+   */
+  windows.add(win, pending)
 
   win.once('ready-to-show', () => win.show())
 
@@ -326,6 +395,15 @@ function createWindow(): void {
     if (quitting) return
 
     /*
+     * 여러 창 중 하나를 닫는 것은 그냥 닫는 것이다 (P27-8).
+     *
+     * 트레이로 물러나는 것은 **마지막 창**의 이야기다. 창이 둘 남았는데 하나를
+     * 닫았다고 숨겨 버리면, 사람이 정리했다고 생각한 창이 보이지 않는 채로
+     * 계속 살아 있게 된다.
+     */
+    if (windows.size > 1) return
+
+    /*
      * 창을 닫는 것은 앱을 끄는 것이 아니다 (P18-1).
      *
      * 세션은 계속 돌고 앱은 트레이로 물러난다. 확인 대화상자도 여기서 띄우지
@@ -349,15 +427,22 @@ function createWindow(): void {
     })
   })
 
-  win.on('closed', () => {
-    mainWindow = null
-  })
+  /*
+   * 창을 닫아도 세션은 살아 있다 (P18-1 / P27-1).
+   *
+   * 레지스트리에서 빠지는 것은 `closed` 이벤트가 알아서 한다. 다만 그 창이
+   * 들고 있던 배치는 사라지므로, 마지막 창이 아니면 저장본에서도 빠진다 —
+   * 그 워크스페이스의 세션은 여전히 살아 있고 `cvmux list-sessions`에 보인다.
+   */
+  win.on('closed', () => schedulePersist())
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return win
 }
 
 // 두 번째 인스턴스는 기존 창을 깨우고 스스로 종료한다. P10-4
@@ -366,6 +451,12 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   // 트레이에 숨어 있을 때 바로가기를 다시 눌러도 창이 돌아와야 한다. P10-4 / P18-5
   app.on('second-instance', showWindow)
+
+  // 화면과 소켓이 "창 하나 더"를 부를 수 있게 만드는 법을 맡겨 둔다. P27-3
+  windows.setFactory(() => {
+    const win = createWindow()
+    return windows.ofWebContents(win.webContents.id)?.id ?? ''
+  })
 
   void app.whenReady().then(() => {
     if (!conPtySupported()) {
@@ -404,11 +495,17 @@ if (!app.requestSingleInstanceLock()) {
       manager,
       notifier,
       {
-        load: () => restoredLayout,
-        save: (workspaces) => {
-          currentLayout = workspaces
+        /*
+         * 배치는 창마다 따로다 (P27-5).
+         *
+         * 어느 창이 묻는지는 IPC 핸들러가 `event.sender`로 되짚는다 — 렌더러가
+         * 자기 id를 실어 보내게 하면 위조할 수 있는 값이 하나 늘어난다.
+         */
+        load: (windowId) => windows.get(windowId)?.layout ?? [],
+        save: (windowId, workspaces) => {
+          windows.setLayout(windowId, workspaces)
           // 사라진 워크스페이스의 메타데이터는 함께 치운다. P25
-          workspaceMeta.prune(workspaces.map((w) => w.id))
+          workspaceMeta.prune(windows.allWorkspaces().map((w) => w.id))
           schedulePersist()
         }
       },
@@ -416,7 +513,8 @@ if (!app.requestSingleInstanceLock()) {
       () => configStore.current.config,
       browsers,
       workspaceMeta,
-      updater
+      updater,
+      windows
     )
 
     /*
@@ -433,7 +531,8 @@ if (!app.requestSingleInstanceLock()) {
         inbox,
         browsers,
         meta: workspaceMeta,
-        layout: () => currentLayout,
+        layout: () => windows.allWorkspaces(),
+        windows: windowControl(),
         updater,
         showWindow,
         reloadConfig: (): ConfigSnapshot => {
@@ -457,22 +556,27 @@ if (!app.requestSingleInstanceLock()) {
     const cliDir = app.isPackaged ? dirname(app.getPath('exe')) : join(app.getAppPath(), 'bin')
     manager.setSessionEnv({ ...control.env, [CLI_DIR_KEY]: cliDir })
 
-    createWindow()
-
     /*
-     * 창을 만든 직후, 렌더러가 로드되기 전에 복원한다. restore는 동기적이라
-     * 렌더러의 첫 list() 호출에는 이미 복원된 세션이 담긴다. P16
+     * 창을 만들기 **전에** 세션을 복원한다 (P16 / P27-5).
+     *
+     * restore는 동기적이라 렌더러의 첫 list() 호출에는 이미 복원된 세션이
+     * 담긴다. 창이 여럿이면 배치도 창 수만큼 나눠 두었다가 하나씩 건넨다.
      */
     if (saved !== null && saved.sessions.length > 0) {
       const ids = manager.restore(saved.sessions)
-      // 저장된 배치의 순번을 방금 발급된 세션 id에 붙인다. P17
-      restoredLayout = workspacesFromPersisted(saved.workspaces, ids)
-      currentLayout = restoredLayout
+      restoredWindows = saved.windows.map((entry) =>
+        workspacesFromPersisted(entry.workspaces, ids)
+      )
       const count = ids.filter((id) => id !== null).length
+      const total = restoredWindows.reduce((n, list) => n + list.length, 0)
       console.log(
-        `[cvmux] 세션 ${count}개, 워크스페이스 ${restoredLayout.length}개를 복원했습니다`
+        `[cvmux] 세션 ${count}개, 워크스페이스 ${total}개를 창 ${restoredWindows.length}개에 복원했습니다`
       )
     }
+
+    // 창을 하나도 복원하지 않았어도 앱은 창 하나로 시작한다
+    const windowCount = Math.max(1, restoredWindows.length)
+    for (let i = 0; i < windowCount; i++) createWindow()
 
     /*
      * 트레이는 창을 닫아도 앱이 살아있다는 유일한 표시다 (P18).
@@ -504,7 +608,7 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (windows.size === 0) createWindow()
     })
   })
 }

@@ -88,6 +88,14 @@ export function App(): JSX.Element {
   const workspacesRef = useRef<Workspace[]>([])
   const sessionsRef = useRef<SessionMeta[]>([])
   const composingRef = useRef(false)
+  /**
+   * 저장된 배치를 이미 읽었는가 (P17 / P27-5).
+   *
+   * 읽기 전에는 저장하지 않는다 — 빈 상태를 먼저 밀어 넣으면 저장본이 지워진다.
+   * 읽은 뒤에는 **비어도 저장한다**: 마지막 워크스페이스를 다른 창으로 보낸
+   * 창이 그 사실을 알리지 못하면, main은 그 창이 아직 들고 있다고 믿는다.
+   */
+  const layoutLoadedRef = useRef(false)
   const browsersRef = useRef<Map<string, BrowserMeta>>(new Map())
   const rightSidebarRef = useRef(false)
 
@@ -342,6 +350,26 @@ export function App(): JSX.Element {
     if (sessionId !== null) closeSurface(sessionId)
   }, [closeSurface])
 
+  /**
+   * 워크스페이스를 이 창에서 떼어 낸다 (P27-7).
+   *
+   * `closeWorkspace`와 다르다 — 세션을 죽이지 않는다. 다른 창이 그대로
+   * 이어받으므로 돌던 명령은 계속 돈다.
+   */
+  const detachWorkspace = useCallback((workspaceId: string): void => {
+    setWorkspaces((prev) => {
+      const next = prev.filter((w) => w.id !== workspaceId)
+      setActiveId((active) => (active === workspaceId ? (next[0]?.id ?? null) : active))
+      return next
+    })
+  }, [])
+
+  /** 다른 창에서 온 워크스페이스를 붙이고 그것을 보여 준다. P27-7 */
+  const attachWorkspace = useCallback((workspace: Workspace): void => {
+    setWorkspaces((prev) => (prev.some((w) => w.id === workspace.id) ? prev : [...prev, workspace]))
+    setActiveId(workspace.id)
+  }, [])
+
   const closeWorkspace = useCallback(
     (workspaceId: string): void => {
       const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
@@ -361,13 +389,22 @@ export function App(): JSX.Element {
       setSessions(list)
 
       // 저장된 레이아웃이 있으면 그대로, 없으면 세션마다 pane 하나짜리 워크스페이스. P17
-      const restored = layout.filter((w) =>
+      const restored = layout.workspaces.filter((w) =>
         paneSessionIds(w).every((id) => list.some((s) => s.id === id))
       )
-      const covered = new Set(restored.flatMap(paneSessionIds))
-      const leftovers = list.filter((s) => !covered.has(s.id)).map((s) => makeWorkspace(s.id))
+      /*
+       * 떠도는 세션은 main이 골라 준다 (P27-5).
+       *
+       * 여기서 "내 배치에 없는 것"으로 판단하면 옆 창이 이미 보여주는 세션까지
+       * 맡아 같은 세션이 두 창에 겹쳐 뜬다. 창은 자기 배치만 안다.
+       */
+      const alive = new Set(list.map((s) => s.id))
+      const leftovers = layout.orphanSessions
+        .filter((id) => alive.has(id))
+        .map((id) => makeWorkspace(id))
       const all = [...restored, ...leftovers]
 
+      layoutLoadedRef.current = true
       if (all.length > 0) {
         setWorkspaces(all)
         setActiveId(all[0].id)
@@ -442,7 +479,7 @@ export function App(): JSX.Element {
 
   // 레이아웃이 바뀔 때마다 main에 넘겨 저장하게 한다. P16 / P17
   useEffect(() => {
-    if (workspaces.length === 0) return
+    if (!layoutLoadedRef.current) return
     void window.cvmux.saveLayout(workspaces)
   }, [workspaces])
 
@@ -788,6 +825,14 @@ export function App(): JSX.Element {
         run: () => void createWorkspace().catch(() => undefined)
       },
       {
+        id: 'window.new',
+        title: '새 창',
+        keywords: 'new window 창',
+        hint: hint('window.new'),
+        section: '세션',
+        run: () => void window.cvmux.newWindow().catch(() => undefined)
+      },
+      {
         id: 'pane.split.right',
         title: '오른쪽으로 분할',
         keywords: 'split right vertical pane',
@@ -1039,6 +1084,8 @@ export function App(): JSX.Element {
       markRead: (id) => {
         void window.cvmux.markRead(id)
       },
+      detachWorkspace,
+      attachWorkspace,
       setRightSidebar: (open, mode) => {
         setRightSidebar((prev) => ({ open, mode: mode ?? prev.mode }))
       },
@@ -1067,10 +1114,12 @@ export function App(): JSX.Element {
       )
     })
   }, [
+    attachWorkspace,
     closeFind,
     closeSurface,
     closeWorkspace,
     createWorkspace,
+    detachWorkspace,
     dropSurface,
     focusPaneIn,
     openBrowser,

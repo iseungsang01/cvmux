@@ -140,6 +140,28 @@ pane 하나가 탭을 여럿 담는다. 화면을 더 나눌 자리가 없는데
 활성 탭을 닫으면 **왼쪽**으로 간다 — 오른쪽으로 가면 연달아 닫을 때 커서가
 목록 끝까지 밀려가고 방금 보던 자리에서 멀어진다.
 
+## 여러 창
+
+`Ctrl+Alt+N`으로 창을 하나 더 연다. 모니터가 둘일 때 한쪽에 에이전트를, 다른
+쪽에 빌드를 두는 식으로 쓴다.
+
+**창은 유리창이지 그릇이 아니다.** 세션은 앱 전체가 하나로 들고 있고 창은
+그중 일부를 들여다볼 뿐이라, 창을 닫아도 그 안에서 돌던 명령은 계속 돈다.
+워크스페이스를 다른 창으로 옮겨도 마찬가지다.
+
+```powershell
+cvmux list-windows                     # 창 목록
+cvmux new-window
+cvmux move-workspace-to-window 2 window:2   # 2번 워크스페이스를 2번 창으로
+cvmux list-panes --window 2            # 2번 창에게 묻는다
+```
+
+`--window`는 전역 플래그다. 주지 않으면 **마지막으로 보고 있던 창**이 대상이다.
+창이 하나뿐이면 아무것도 달라지지 않는다.
+
+창이 여럿일 때 하나를 닫으면 그냥 닫힌다. 트레이로 물러나는 것은 마지막 창의
+이야기다.
+
 ## 에이전트가 사이드바에 쓰기
 
 사이드바의 신호등(P4)은 출력을 보고 **짐작한** 것이다. 에이전트는 자기가 지금
@@ -248,6 +270,7 @@ cvmux new-split down                   # 아래로 분할
 cvmux send --session 2 "npm test" --enter
 cvmux read-screen --lines 40           # 화면을 텍스트로
 cvmux list-workspaces --json
+cvmux list-panes --window 2             # 2번 창에게 묻는다
 ```
 
 `--help`와 `--version`은 **앱이 꺼져 있어도** 답한다. 대상은 `workspace:2` 같은
@@ -417,6 +440,7 @@ cvmux hooks record --agent codex
 | 키 | 동작 |
 |----|------|
 | `Ctrl+Shift+N` | 새 세션 (보고 있던 작업 디렉토리를 물려받음) |
+| `Ctrl+Alt+N` | 새 창 |
 | `Alt+Shift+=` | 오른쪽으로 분할 |
 | `Alt+Shift+-` | 아래로 분할 |
 | `Ctrl+Shift+W` | 현재 pane 닫기 (마지막 pane이면 세션 전체) |
@@ -501,6 +525,7 @@ src/
   main/                Electron 메인 프로세스 — PTY를 직접 소유한다
     ipc.ts             렌더러 ↔ PtyManager 중계, 제어 소켓 다리 (P20-7)
     control-socket.ts  named pipe 제어 서버 (P20)
+    windows.ts         창 레지스트리 — 어느 창이 무엇을 보고 있는가 (P27)
     browser.ts         내장 브라우저 화면 관리 (P23)
     browser-agent.ts   페이지 안에서 도는 조작 코드 (P23-3)
     tray.ts            트레이 상주 (P18)
