@@ -636,6 +636,8 @@ app.on('before-quit', (event) => {
   // 네이티브 뷰는 창보다 오래 살 수 있다. 앱이 끝나기 전에 거둔다. P23-2
   browsers.closeAll()
   updater.dispose()
+  // 설정 파일 감시자도 함께 놓는다 — 열어 둔 것은 닫고 나간다. P22-4
+  configStore.dispose()
 
   if (persistTimer !== null) {
     clearInterval(persistTimer)
