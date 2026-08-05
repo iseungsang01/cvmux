@@ -92,15 +92,6 @@ export class AgentSessionStore {
     return this.records.get(sessionId) ?? null
   }
 
-  forget(sessionId: string): void {
-    if (!this.records.delete(sessionId)) return
-    this.save()
-  }
-
-  list(): AgentSessionRecord[] {
-    return [...this.records.values()]
-  }
-
   /**
    * 살아 있는 세션의 것만 남긴다.
    *

@@ -11,7 +11,6 @@ import {
   type CvmuxApi,
   type Notification,
   type RestoredLayout,
-  type RightSidebarMode,
   type SessionExitInfo,
   type SessionMeta,
   type SessionSnapshot,
@@ -96,8 +95,6 @@ const api: CvmuxApi = {
   onBrowser: (cb) => subscribe<[BrowserMeta]>(IPC.EVT_BROWSER, cb),
   onWorkspaceMeta: (cb) =>
     subscribe<[Record<string, WorkspaceMeta>]>(IPC.EVT_WORKSPACE_META, cb),
-  onRightSidebar: (cb) =>
-    subscribe<[{ open: boolean; mode: RightSidebarMode }]>(IPC.EVT_RIGHT_SIDEBAR, cb),
   onUpdate: (cb) => subscribe<[UpdateState]>(IPC.EVT_UPDATE, cb)
 }
 

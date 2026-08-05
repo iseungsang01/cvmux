@@ -155,17 +155,8 @@ export class BrowserManager {
     for (const id of [...this.surfaces.keys()]) this.close(id)
   }
 
-  has(id: string): boolean {
-    return this.surfaces.has(id)
-  }
-
   list(): BrowserMeta[] {
     return [...this.surfaces.values()].map((s) => this.metaOf(s))
-  }
-
-  meta(id: string): BrowserMeta | null {
-    const surface = this.surfaces.get(id)
-    return surface ? this.metaOf(surface) : null
   }
 
   // ── 조작 ─────────────────────────────────────────────────────

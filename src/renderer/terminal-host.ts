@@ -130,10 +130,6 @@ export class TerminalHost {
     }
   }
 
-  has(id: string): boolean {
-    return this.entries.has(id)
-  }
-
   /** 컨테이너에 붙인다. 이미 열린 인스턴스는 DOM만 옮겨 붙여 내용을 보존한다. P5-1 */
   attach(id: string, container: HTMLElement): void {
     const entry = this.ensure(id)

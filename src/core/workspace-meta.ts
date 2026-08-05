@@ -210,11 +210,6 @@ export class WorkspaceMetaStore {
     return next
   }
 
-  forget(workspaceId: string): void {
-    if (!this.meta.delete(workspaceId)) return
-    this.onChange()
-  }
-
   /** 사라진 워크스페이스의 메타데이터를 치운다 */
   prune(alive: Iterable<string>): void {
     const keep = new Set(alive)

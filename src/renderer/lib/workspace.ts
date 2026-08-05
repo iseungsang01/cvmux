@@ -1,5 +1,5 @@
 import type { PaneNode, SessionMeta, SessionStatus, Workspace } from '@shared/types'
-import { activeSurface, collectLeaves, collectSessionIds, createLeaf, findLeaf } from './layout'
+import { activeSurface, collectSessionIds, createLeaf, findLeaf } from './layout'
 
 /**
  * 워크스페이스(사이드바 한 줄)와 그 안의 pane들을 잇는 유틸 (POLICY.md P17).
@@ -71,10 +71,6 @@ export function workspaceTitle(
   const meta = focused !== null ? sessions.get(focused) : undefined
   if (meta) return meta.title
   return representativeSession(workspace, sessions)?.title ?? 'session'
-}
-
-export function paneIds(workspace: Workspace): string[] {
-  return collectLeaves(workspace.root).map((leaf) => leaf.id)
 }
 
 /**

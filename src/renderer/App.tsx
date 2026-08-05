@@ -375,7 +375,7 @@ export function App(): JSX.Element {
       const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
       if (!workspace) return
       // 워크스페이스를 닫으면 그 안의 pane 전부를 끝낸다
-      for (const leaf of paneSessionIds(workspace)) closeSurface(leaf)
+      for (const leaf of collectAllSurfaces(workspace.root)) closeSurface(leaf)
     },
     [closeSurface]
   )
@@ -390,7 +390,7 @@ export function App(): JSX.Element {
 
       // 저장된 레이아웃이 있으면 그대로, 없으면 세션마다 pane 하나짜리 워크스페이스. P17
       const restored = layout.workspaces.filter((w) =>
-        paneSessionIds(w).every((id) => list.some((s) => s.id === id))
+        collectAllSurfaces(w.root).every((id) => list.some((s) => s.id === id))
       )
       /*
        * 떠도는 세션은 main이 골라 준다 (P27-5).
@@ -541,7 +541,7 @@ export function App(): JSX.Element {
     const timer = window.setTimeout(() => {
       const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
       if (!workspace) return
-      for (const sessionId of paneSessionIds(workspace)) host.refit(sessionId)
+      for (const sessionId of collectAllSurfaces(workspace.root)) host.refit(sessionId)
     }, 220)
     return () => window.clearTimeout(timer)
   }, [sidebarCollapsed, host])
@@ -551,7 +551,7 @@ export function App(): JSX.Element {
     const onFocus = (): void => {
       const workspace = workspacesRef.current.find((w) => w.id === activeIdRef.current)
       if (!workspace) return
-      for (const sessionId of paneSessionIds(workspace)) host.refit(sessionId)
+      for (const sessionId of collectAllSurfaces(workspace.root)) host.refit(sessionId)
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
@@ -730,9 +730,6 @@ export function App(): JSX.Element {
     void window.cvmux.workspaceMeta().then(setWorkspaceMeta)
     return window.cvmux.onWorkspaceMeta(setWorkspaceMeta)
   }, [])
-
-  // 소켓에서 오른쪽 사이드바를 열 수 있다 (P25-7 / P21-11과 같은 이유)
-  useEffect(() => window.cvmux.onRightSidebar(setRightSidebar), [])
 
   // ── 내장 브라우저 (P23) ──────────────────────────────────────
   useEffect(() => {
@@ -947,7 +944,7 @@ export function App(): JSX.Element {
         id: 'browser.open',
         title: '브라우저 열기',
         keywords: 'browser open web preview page',
-        hint: hint('browser.open'),
+        // 기본 단축키가 없다 — 팔레트로만 연다. `session.restart`와 같은 자리다
         section: '브라우저',
         run: () => void openBrowser('about:blank').catch(() => undefined)
       },
@@ -1146,13 +1143,6 @@ export function App(): JSX.Element {
         </span>
 
         {/*
-          알림 배지 (P21-3).
-
-          미읽음이 없으면 숫자를 달지 않는다 — 늘 0이 떠 있으면 배지가 신호를
-          잃는다. 종은 항상 자리를 지켜서, 눌러 볼 곳이 있다는 사실 자체는
-          사라지지 않는다.
-        */}
-        {/*
           업데이트가 준비됐을 때만 뜬다 (P26-2).
 
           대화상자로 막아서지 않는다 — 하던 일을 끊지 않는 것이 이 기능의
@@ -1169,6 +1159,13 @@ export function App(): JSX.Element {
           </button>
         )}
 
+        {/*
+          알림 배지 (P21-3).
+
+          미읽음이 없으면 숫자를 달지 않는다 — 늘 0이 떠 있으면 배지가 신호를
+          잃는다. 종은 항상 자리를 지켜서, 눌러 볼 곳이 있다는 사실 자체는
+          사라지지 않는다.
+        */}
         <button
           type="button"
           className={`icon-button titlebar-bell${unreadCount > 0 ? ' is-unread' : ''}`}
@@ -1298,11 +1295,11 @@ export function App(): JSX.Element {
 }
 
 /**
- * 워크스페이스가 붙들고 있는 모든 surface (P24-4).
+ * 이 워크스페이스가 붙들고 있는 세션들 — 오른쪽 사이드바의 '세션' 목록 (P25-7).
  *
- * 보이는 것만 세면 탭 뒤의 세션이 조용히 남아 프로세스만 살아 있게 된다.
+ * 숨은 탭까지 센다. 보이는 것만 세면 탭 뒤의 세션이 조용히 남아 프로세스만
+ * 살아 있게 된다(P24-4).
  */
-/** 이 워크스페이스가 붙들고 있는 세션들 — 오른쪽 사이드바의 '세션' 목록. P25-7 */
 function visibleSessions(
   workspace: Workspace,
   sessions: Map<string, SessionMeta>
@@ -1310,8 +1307,4 @@ function visibleSessions(
   return collectAllSurfaces(workspace.root)
     .map((id) => sessions.get(id))
     .filter((meta): meta is SessionMeta => meta !== undefined)
-}
-
-function paneSessionIds(workspace: Workspace): string[] {
-  return collectAllSurfaces(workspace.root)
 }

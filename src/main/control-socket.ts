@@ -27,6 +27,7 @@ import {
   M_INTERNAL,
   RENDERER_METHODS,
   resolveHandle,
+  type ControlAckFrame,
   type ControlEndpoint,
   type ControlErrorCode,
   type ControlEventFrame,
@@ -149,7 +150,6 @@ export class ControlSocketServer {
   private readonly password = randomBytes(24).toString('hex')
   private readonly events: ControlEventFrame[] = []
   private seq = 0
-  private nextId = 1
 
   constructor(
     private readonly host: ControlHost,
@@ -853,25 +853,19 @@ export class ControlSocketServer {
       : null
 
     const oldest = this.events[0]?.seq ?? this.seq
-    const gap = after > 0 && after + 1 < oldest
+    const ack: ControlAckFrame = {
+      type: 'ack',
+      resume: {
+        afterSeq: after,
+        oldestSeq: oldest,
+        latestSeq: this.seq,
+        nextSeq: this.seq + 1,
+        gap: after > 0 && after + 1 < oldest
+      }
+    }
 
     client.subscription = { names, pending: 0 }
-    client.socket.write(
-      `${JSON.stringify({
-        id,
-        ok: true,
-        result: {
-          type: 'ack',
-          resume: {
-            afterSeq: after,
-            oldestSeq: oldest,
-            latestSeq: this.seq,
-            nextSeq: this.seq + 1,
-            gap
-          }
-        }
-      })}\n`
-    )
+    client.socket.write(`${JSON.stringify({ id, ok: true, result: ack })}\n`)
 
     for (const frame of this.events) {
       if (frame.seq <= after) continue
@@ -979,11 +973,6 @@ export class ControlSocketServer {
     const found = resolveHandle(browsers, String(ref), 'browser')
     if (!found) throw new ControlError('not_found', `브라우저 화면을 찾을 수 없습니다: ${String(ref)}`)
     return found.id
-  }
-
-  /** 렌더러가 이벤트를 넣을 때 쓰는 id 발급기 */
-  takeId(): number {
-    return this.nextId++
   }
 }
 

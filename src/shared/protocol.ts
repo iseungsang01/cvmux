@@ -82,8 +82,6 @@ export interface ControlAckFrame {
   }
 }
 
-export type ControlFrame = ControlResponse | ControlEventFrame | ControlAckFrame
-
 /**
  * 앱을 찾는 방법 (P20-2).
  *
@@ -119,14 +117,10 @@ export const M_INTERNAL = {
  * 항상 `window.move-workspace` 한 번으로 짝을 지어 부른다.
  */
 
-/** 세션·워크스페이스·pane을 가리키는 방법. P20-4 */
-export interface HandleRef {
-  /** `workspace:2` 같은 참조, UUID, 또는 1부터 세는 순번 문자열 */
-  raw: string
-}
-
 /**
- * `<kind>:<n>` 참조를 푼다.
+ * `<kind>:<n>` 참조를 푼다 (P20-4).
+ *
+ * 가리키는 방법은 셋이다 — `workspace:2` 같은 참조, UUID, 1부터 세는 순번.
  *
  * `workspace:2` → 2번째 워크스페이스. 접두어 없는 숫자도 순번으로 본다.
  * 그 밖의 문자열은 id로 취급한다 — 짧게 줄인 id도 접두 일치로 받아 준다.
@@ -262,8 +256,6 @@ export const M = {
   EVENTS_STREAM: 'events.stream'
 } as const
 
-export type ControlMethod = (typeof M)[keyof typeof M]
-
 /**
  * 렌더러가 답해야 하는 메서드 (P20-7).
  *
@@ -309,6 +301,5 @@ export const EV = {
   SESSION_CLOSED: 'session.closed',
   SESSION_EXITED: 'session.exited',
   SESSION_STATUS: 'session.status',
-  SESSION_NOTIFY: 'session.notify',
-  WORKSPACE_SELECTED: 'workspace.selected'
+  SESSION_NOTIFY: 'session.notify'
 } as const

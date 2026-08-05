@@ -268,33 +268,6 @@ export function cycleSurface(root: PaneNode, paneId: string, delta: number): Pan
   return selectSurface(root, paneId, (((from + delta) % count) + count) % count)
 }
 
-/** 탭 순서 바꾸기 — 드래그로 옮긴다 */
-export function moveSurface(root: PaneNode, paneId: string, from: number, to: number): PaneNode {
-  const apply = (node: PaneNode): PaneNode => {
-    if (node.kind === 'leaf') {
-      if (node.id !== paneId) return node
-      const count = node.surfaces.length
-      if (from < 0 || from >= count || to < 0 || to >= count || from === to) return node
-      const surfaces = [...node.surfaces]
-      const [moved] = surfaces.splice(from, 1)
-      surfaces.splice(to, 0, moved)
-      const active = clampIndex(node.active, count)
-      // 옮긴 탭을 보고 있었다면 따라간다. 아니면 자리 이동만큼 보정한다
-      const next =
-        active === from
-          ? to
-          : active > from && active <= to
-            ? active - 1
-            : active < from && active >= to
-              ? active + 1
-              : active
-      return { ...node, surfaces, active: next }
-    }
-    return { ...node, children: node.children.map(apply) }
-  }
-  return apply(root)
-}
-
 /** 분할 비율을 조정한다. 인접한 두 칸 사이에서만 주고받는다. P17-5 */
 export function resizeSplit(
   root: PaneNode,

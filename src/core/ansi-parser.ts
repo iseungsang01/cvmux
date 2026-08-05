@@ -45,12 +45,12 @@ export class AnsiParser {
 
   constructor(private readonly events: AnsiEvents) {}
 
-  /** 커서가 놓인, 아직 개행되지 않은 줄. 프롬프트 판정 대상. P4-12 */
-  get currentLine(): string {
-    return this.line
-  }
-
-  /** 미리보기용 텍스트 — 현재 줄이 비었으면 마지막 확정 줄. P4-13 */
+  /**
+   * 프롬프트 판정과 미리보기가 함께 보는 줄 (P4-12 / P4-13).
+   *
+   * 커서가 놓인 줄이 비어 있으면 마지막으로 확정된 줄을 쓴다 — 셸이 프롬프트를
+   * 그린 뒤 화면을 정리하느라 개행을 흘리면 "현재 줄"만으로는 프롬프트를 놓친다.
+   */
   get previewLine(): string {
     return this.line.trim().length > 0 ? this.line : this.lastLine
   }

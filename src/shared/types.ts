@@ -257,7 +257,6 @@ export const IPC = {
   RESIZE: 'session:resize',
   SET_TITLE: 'session:set-title',
   MARK_READ: 'session:mark-read',
-  RESIZE_HINT: 'session:resize-hint',
   CONFIRM_PASTE: 'app:confirm-paste',
   /** 클립보드 내용 조회 — 렌더러는 샌드박스라 직접 읽을 수 없다. P7-4 */
   READ_CLIPBOARD: 'app:read-clipboard',
@@ -314,8 +313,6 @@ export const IPC = {
   EVT_BROWSER: 'evt:browser',
   /** 워크스페이스 메타데이터가 바뀌었다. P25 */
   EVT_WORKSPACE_META: 'evt:workspace-meta',
-  /** 소켓이 오른쪽 사이드바를 열라고 한다. P25-7 */
-  EVT_RIGHT_SIDEBAR: 'evt:right-sidebar',
   /** 업데이트 상태가 바뀌었다. P26 */
   EVT_UPDATE: 'evt:update'
 } as const
@@ -430,6 +427,5 @@ export interface CvmuxApi {
   onConfig(cb: (config: CvmuxConfig) => void): () => void
   onBrowser(cb: (meta: BrowserMeta) => void): () => void
   onWorkspaceMeta(cb: (meta: Record<string, WorkspaceMeta>) => void): () => void
-  onRightSidebar(cb: (state: { open: boolean; mode: RightSidebarMode }) => void): () => void
   onUpdate(cb: (state: UpdateState) => void): () => void
 }

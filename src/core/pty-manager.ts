@@ -830,12 +830,6 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     return true
   }
 
-  /** 활성 세션의 cwd를 새 세션이 물려받는다. P11-1 */
-  cwdOf(id: string | null | undefined): string | undefined {
-    if (!id) return undefined
-    return this.sessions.get(id)?.cwd
-  }
-
   /** busy 세션이 몇 개인지 — 종료 확인 대화상자에 쓴다. P10-1 */
   busyCount(): number {
     let n = 0
