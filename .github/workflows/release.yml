@@ -46,6 +46,18 @@ jobs:
       # 로컬에서는 `npm run package`가 build를 먼저 돌려 주므로 드러나지 않는다.
       - run: npm run build
 
+      # 릴리스 자리를 먼저 만들어 둔다.
+      #
+      # electron-builder에게 맡기면 자산마다 "없으면 만든다"가 동시에 돌아 같은
+      # 태그로 릴리스가 둘 생기고 파일이 그 사이에 흩어진다 — 실제로 겪었다.
+      # `latest.yml`과 설치 파일이 다른 릴리스에 앉으면 자동 업데이트는 파일을
+      # 찾지 못한다. 자리가 이미 있으면 electron-builder는 올리기만 한다.
+      - name: 릴리스 자리를 먼저 만든다
+        if: github.ref_type == 'tag'
+        run: gh release create "$env:GITHUB_REF_NAME" --title "$env:GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 설치 파일 만들고 릴리스에 올린다
         run: npx electron-builder --win --publish always
         env:

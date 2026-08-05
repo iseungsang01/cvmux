@@ -14,6 +14,9 @@ publish:
   provider: github
   owner: iseungsang01
   repo: cvmux
+  # draft는 electron-updater가 보지 못한다 — `releases/latest`에 잡히지 않고
+  # 자산도 내려받을 수 없다. 올라가는 순간 공개 상태여야 한다.
+  releaseType: release
 
 # node-pty는 N-API(node-addon-api) 모듈이라 ABI가 고정돼 있다. npm이 설치한
 # 바이너리가 Electron에서 그대로 동작하는 것을 실측으로 확인했으므로 다시 빌드하지
