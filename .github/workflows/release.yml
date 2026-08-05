@@ -39,6 +39,13 @@ jobs:
       # 회귀 테스트가 깨진 것을 배포하지 않는다
       - run: npm test
 
+      # out/ 은 저장소에 없다 — 여기서 만든다.
+      #
+      # 이 줄이 없으면 electron-builder가 빈 asar를 싸고
+      # `Application entry file "out\main\index.js" ... is corrupted`로 끝난다.
+      # 로컬에서는 `npm run package`가 build를 먼저 돌려 주므로 드러나지 않는다.
+      - run: npm run build
+
       - name: 설치 파일 만들고 릴리스에 올린다
         run: npx electron-builder --win --publish always
         env:
