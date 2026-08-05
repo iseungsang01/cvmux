@@ -8,12 +8,6 @@ export const POLICY = {
   /** 동시 세션 상한. 초과 생성은 거부하고 사유를 표시한다. P1-8 / P8-3 */
   MAX_SESSIONS: 32,
 
-  /** xterm 세션당 스크롤백 줄 수. P3-6 / P8-1 */
-  SCROLLBACK_LINES: 10_000,
-
-  /** 미리보기·상태 판정용 누적 버퍼 크기. 초과분은 앞에서 버린다. P3-2 / P3-6 / P8-2 */
-  PREVIEW_BUFFER_BYTES: 8 * 1024,
-
   /** 렌더러 크래시/재로드 후 화면 복구용 재생 버퍼. P9-1 */
   REPLAY_BUFFER_BYTES: 256 * 1024,
 

@@ -326,7 +326,7 @@ export class TerminalHost {
       fontSize: this.config.terminal.fontSize,
       lineHeight: this.config.terminal.lineHeight,
       letterSpacing: 0,
-      // 기본값은 POLICY.SCROLLBACK_LINES와 같다. 설정이 바꿀 수 있다. P3-6 / P8-1 / P22-2
+      // 상한은 설정이 정한다 — 기본 10,000줄. P3-6 / P8-1 / P22-2
       scrollback: this.config.terminal.scrollback,
       cursorBlink: this.config.terminal.cursorBlink,
       cursorStyle: this.config.terminal.cursorStyle,

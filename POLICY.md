@@ -48,8 +48,8 @@ Windows의 PTY는 ConPTY다. macOS의 `forkpty`와 동작이 다르며, 여기�
 | ID | 엣지 케이스 | cvmux 정책 | 구현 위치 |
 |----|-------------|-----------|----------|
 | P2-1 | 터미널 크기가 0 또는 음수 | `cols/rows`를 최소 1로 클램프한 뒤 resize 호출. ConPTY는 0을 받으면 오류를 던진다 | `pty-manager.ts` |
-| P2-2 | 창 리사이즈가 초당 수십 회 발생 | resize를 **60ms 디바운스**. ConPTY resize는 비싸고 연속 호출 시 화면이 깨진다 | `TerminalView.tsx` |
-| P2-3 | 숨겨진(비활성) 세션의 리사이즈 | 숨김 상태에서는 컨테이너 크기가 0이므로 **fit을 건너뛴다**. 활성화되는 순간 1회 fit + resize | `TerminalView.tsx` |
+| P2-2 | 창 리사이즈가 초당 수십 회 발생 | resize를 **60ms 디바운스**. ConPTY resize는 비싸고 연속 호출 시 화면이 깨진다 | `terminal-host.ts` |
+| P2-3 | 숨겨진(비활성) 세션의 리사이즈 | 숨김 상태에서는 컨테이너 크기가 0이므로 **fit을 건너뛴다**. 활성화되는 순간 1회 fit + resize | `terminal-host.ts` |
 | P2-4 | 리사이즈 직후 재랩(reflow) | ConPTY가 스크롤백을 다시 흘려보내므로 이를 정상 출력으로 취급. 상태 감지 타이머를 리사이즈 후 300ms 억제해 오탐 방지 | `session-state.ts` |
 | P2-5 | 종료된 PTY에 write/resize | 무시. `EPIPE`/`Access denied` 예외를 삼킨다 | `pty-manager.ts` |
 | P2-6 | ConPTY 미지원 환경 (Windows 10 1809 미만) | 시작 시 빌드 번호 확인. 미지원이면 명확한 안내 후 종료 | `main/index.ts` |
@@ -66,7 +66,7 @@ Windows의 PTY는 ConPTY다. macOS의 `forkpty`와 동작이 다르며, 여기�
 | P3-3 | 한글 Windows 코드페이지(949) 출력 깨짐 | 세션 시작 시 PowerShell에 `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` 부트스트랩 주입. 사용자 프로필을 건드리지 않고 세션 한정 | `pty-manager.ts` |
 | P3-4 | 초당 수 MB 대량 출력 (`cat` 대용량 파일) | IPC를 **16ms 간격으로 배칭**. 프레임당 1회 전송. 배치 버퍼 상한 256KB, 초과 시 즉시 flush | `pty-manager.ts` |
 | P3-5 | 바이너리 데이터가 터미널에 쏟아짐 | 필터링하지 않는다(터미널의 정상 동작). 단 미리보기 텍스트에는 제어문자를 제거한 결과만 사용 | `session-state.ts` |
-| P3-6 | 출력이 무한 루프로 계속됨 | 세션별 스크롤백 상한 10,000줄(xterm 설정). 미리보기 버퍼는 최근 8KB만 유지 | `TerminalView.tsx`, `session-state.ts` |
+| P3-6 | 출력이 무한 루프로 계속됨 | 세션별 스크롤백 상한 기본 10,000줄 — 값은 설정이 정한다(`terminal.scrollback`, P22-2). 상태 판정은 화면 전체가 아니라 **커서가 놓인 줄 하나**만 들고 있으므로 출력이 아무리 흘러도 자라지 않는다 | `terminal-host.ts`, `ansi-parser.ts` |
 | P3-7 | 런처가 `NO_COLOR`를 켠 채 cvmux를 실행 | 세션 환경에서 **`NO_COLOR`를 제거한다**. cvmux 세션은 트루컬러를 완전히 지원하는 새 터미널이고, 앱을 띄운 부모 프로세스의 색상 정책이 세션 안으로 새어들 이유가 없다. 실제로 다른 에이전트 CLI 안에서 cvmux를 띄우면 그 CLI가 심어둔 `NO_COLOR=1` 때문에 모든 하위 CLI가 흑백이 된다. 색을 원치 않으면 `CVMUX_NO_COLOR=1`로 명시한다 | `pty-manager.ts` |
 | P3-8 | `TERM=dumb` 상속 | 마찬가지로 세션에서는 `xterm-256color`로 덮어쓴다. 터미널의 능력은 세션이 결정한다 | 동일 |
 | P3-9 | 런처가 Electron 앱 | 세션 환경에서 **`ELECTRON_RUN_AS_NODE`를 제거한다**. P3-7과 같은 부류다 — 에이전트 CLI 안에서 cvmux를 띄우면 이 값이 그대로 흘러들고, 그러면 세션 안에서 실행한 Electron 앱이 창 대신 Node 스크립트로 뜬다. 실제로 이 프로젝트를 개발하다 겪었다 | 동일 |
@@ -132,7 +132,7 @@ cmux는 **명시적 신호**(OSC 9 / OSC 777 / OSC 99 / BEL, `cmux notify` CLI)�
 
 | ID | 엣지 케이스 | cvmux 정책 | 구현 위치 |
 |----|-------------|-----------|----------|
-| P5-1 | 세션 전환 | xterm 인스턴스를 **파괴하지 않는다**. CSS로 표시/숨김만 전환해 스크롤백과 커서 위치를 보존 | `TerminalView.tsx` |
+| P5-1 | 세션 전환 | xterm 인스턴스를 **파괴하지 않는다**. CSS로 표시/숨김만 전환해 스크롤백과 커서 위치를 보존 | `terminal-host.ts` |
 | P5-2 | WebGL 컨텍스트 손실 | `webglcontextlost` 이벤트에서 addon을 dispose하고 canvas 렌더러로 폴백. 검은 화면 금지 | 동일 |
 | P5-3 | WebGL 초기화 실패 (원격 데스크톱, 구형 GPU) | try/catch로 감싸고 기본 렌더러 사용. 오류를 사용자에게 노출하지 않음 | 동일 |
 | P5-4 | DPI 변경 / 모니터 간 창 이동 | `devicePixelRatio` 변화를 감지해 fit 재실행 | 동일 |
@@ -153,7 +153,7 @@ cmux는 **명시적 신호**(OSC 9 / OSC 777 / OSC 99 / BEL, `cmux notify` CLI)�
 | P6-2 | `Ctrl+V` / `Ctrl+Shift+V` | 붙여넣기. xterm에 맡기지 않고 클립보드를 직접 읽는다 (P7-4 / P7-5) | 동일 |
 | P6-3 | 앱 단축키가 셸 단축키와 충돌 | 앱 단축키는 셸에서 거의 안 쓰는 조합만 사용: `Ctrl+Shift+N`(새 세션), `Ctrl+Shift+W`(닫기), `Ctrl+Alt+1~8`(전환), `Ctrl+Shift+B`(사이드바). 단순 `Ctrl+N`/`Ctrl+B`는 셸이 쓰므로 **쓰지 않는다** | `App.tsx` |
 | P6-4 | 한글 IME 조합 중 | 조합 중(`compositionstart`~`end`)에는 앱 단축키를 처리하지 않는다 | 동일 |
-| P6-5 | 터미널에 포커스가 없을 때 타이핑 | 활성 터미널로 포커스를 되돌린다 | `TerminalView.tsx` |
+| P6-5 | 터미널에 포커스가 없을 때 타이핑 | 활성 터미널로 포커스를 되돌린다 | `terminal-host.ts` |
 | P6-6 | 종료된 세션에서 키 입력 | Enter는 재시작(P1-4), 나머지는 무시 | 동일 |
 
 ---
@@ -174,8 +174,8 @@ cmux는 **명시적 신호**(OSC 9 / OSC 777 / OSC 99 / BEL, `cmux notify` CLI)�
 
 | ID | 정책 |
 |----|------|
-| P8-1 | 세션당 스크롤백 10,000줄 (약 2~5MB) |
-| P8-2 | 미리보기 버퍼 세션당 8KB 링버퍼 |
+| P8-1 | 세션당 스크롤백 기본 10,000줄 (약 2~5MB). 설정으로 100~200,000줄 사이에서 바꾼다 (`terminal.scrollback`) |
+| P8-2 | 상태 판정용 버퍼는 **줄 단위**다 — 현재 줄과 마지막으로 확정된 줄만 남는다. 미완결 이스케이프 시퀀스만 4KB까지 이어 붙이고, 그보다 길어지면 깨진 스트림으로 보고 버린다 |
 | P8-3 | 동시 세션 상한 32개 |
 | P8-4 | IPC 배치 상한 256KB / 16ms |
 | P8-5 | 비활성 세션도 PTY는 계속 돌아간다 (일시정지 금지 — 백그라운드 작업이 목적이므로) |
