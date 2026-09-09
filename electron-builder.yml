@@ -64,6 +64,11 @@ files:
   - '!node_modules/node-pty/deps/**'
   - '!node_modules/node-pty/scripts/**'
   - '!node_modules/node-pty/lib/**/*.test.js'
+  # winpty는 ConPTY가 없던 시절(Windows 10 1809 이전)의 폴백이다. 우리는
+  # `useConpty: true`로 못을 박아 두었으므로(pty-manager.ts) 이 두 파일은
+  # 열리지 않는다 — 지운 채로 세션을 띄워 확인했다.
+  - '!node_modules/node-pty/prebuilds/win32-x64/winpty.dll'
+  - '!node_modules/node-pty/prebuilds/win32-x64/winpty-agent.exe'
   # N-API 헤더는 컴파일할 때만 쓴다. npmRebuild가 꺼져 있으므로 여기서는
   # 한 번도 열리지 않는다
   - '!node_modules/node-addon-api/**'

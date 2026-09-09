@@ -13,9 +13,6 @@
  *   libGLESv2.dll / libEGL.dll / d3dcompiler_47.dll
  *     xterm의 WebGL 렌더러가 ANGLE을 타고 D3D11로 내려간다. 터미널 스크롤
  *     성능이 여기에 달려 있다.
- *   vk_swiftshader.dll / vulkan-1.dll
- *     GPU가 없는 환경(원격 데스크톱, 가상 머신)의 마지막 폴백이다. 6MB를
- *     아끼자고 그런 기기에서 화면이 깨지는 것은 남는 장사가 아니다.
  *   LICENSES.chromium.html
  *     서드파티 라이선스 고지다. 20MB지만 지울 수 있는 종류의 파일이 아니다.
  */
@@ -29,6 +26,15 @@ const DROP = [
   ['dxil.dll', 'WebGPU 셰이더 서명'],
   // <video>/<audio>와 코덱. 터미널에는 재생할 것이 없다.
   ['ffmpeg.dll', '미디어 코덱'],
+  /*
+   * 소프트웨어 Vulkan. GPU가 없을 때의 폴백으로 알려져 있지만, 그 자리는
+   * 이미 Skia의 CPU 래스터가 맡는다 — `--disable-gpu`로, 이 세 파일을 지운
+   * 채로 앱을 띄워 창이 그대로 그려지는 것과 세션이 도는 것을 확인했다.
+   * xterm의 WebGL 렌더러도 실패하면 DOM 렌더러로 물러난다(terminal-host.ts).
+   */
+  ['vk_swiftshader.dll', '소프트웨어 Vulkan'],
+  ['vulkan-1.dll', 'Vulkan 로더'],
+  ['vk_swiftshader_icd.json', 'SwiftShader 드라이버 등록 정보'],
 ]
 
 export default async function trimRuntime(context) {
