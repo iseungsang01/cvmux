@@ -13,6 +13,13 @@
  *   libGLESv2.dll / libEGL.dll / d3dcompiler_47.dll
  *     xterm의 WebGL 렌더러가 ANGLE을 타고 D3D11로 내려간다. 터미널 스크롤
  *     성능이 여기에 달려 있다.
+ *   ffmpeg.dll
+ *     "재생할 미디어가 없으니 빼도 된다"고 지웠다가 설치본이 뜨자마자 죽었다.
+ *     Blink 렌더러는 첫 프레임을 그리기 전에 미디어 서브시스템을 올리며
+ *     ffmpeg.dll을 로드한다 — <video>를 쓰지 않아도 마찬가지다. 없으면 렌더
+ *     프레임이 곧바로 폐기되고 창이 아예 뜨지 않는다. 레포에서 포장본을 띄우면
+ *     node_modules의 ffmpeg.dll을 작업 디렉토리 검색으로 주워 담아 이 사실이
+ *     가려지므로, 검증은 반드시 포장 폴더를 작업 디렉토리로 삼아 띄운다.
  *   LICENSES.chromium.html
  *     서드파티 라이선스 고지다. 20MB지만 지울 수 있는 종류의 파일이 아니다.
  */
@@ -24,8 +31,6 @@ const DROP = [
   // WebGPU(Dawn)의 셰이더 컴파일러. cvmux는 WebGPU 컨텍스트를 만들지 않는다.
   ['dxcompiler.dll', 'WebGPU 셰이더 컴파일러'],
   ['dxil.dll', 'WebGPU 셰이더 서명'],
-  // <video>/<audio>와 코덱. 터미널에는 재생할 것이 없다.
-  ['ffmpeg.dll', '미디어 코덱'],
   /*
    * 소프트웨어 Vulkan. GPU가 없을 때의 폴백으로 알려져 있지만, 그 자리는
    * 이미 Skia의 CPU 래스터가 맡는다 — `--disable-gpu`로, 이 세 파일을 지운
