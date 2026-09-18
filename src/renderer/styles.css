@@ -856,6 +856,56 @@ kbd {
   color: var(--text);
 }
 
+/* ⇄ 우클릭 — 연속 전달 상한 (P29-6) */
+.relay-limit {
+  position: absolute;
+  top: calc(50% + 18px);
+  left: 50%;
+  z-index: 6;
+  width: 232px;
+  padding: 10px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  color: var(--text);
+  font-size: 12px;
+  cursor: default;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.relay-limit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.relay-limit-row input {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.relay-limit-row input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.relay-limit-hint {
+  margin-top: 6px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.relay-limit-hint.is-invalid {
+  color: var(--danger);
+}
+
 /* 켜져 있으면 늘 보인다 — 자동으로 넘기고 있다는 것을 잊으면 안 된다 */
 .relay-toggle:not(.is-off) {
   opacity: 1;

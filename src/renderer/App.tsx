@@ -1314,6 +1314,8 @@ export function App(): JSX.Element {
                     onCloseSurface={closeSurface}
                     onMoveSurface={handleMoveSurface}
                     onSetRelay={(a, b, mode) => void window.cvmux.setRelay(a, b, mode)}
+                    relayLimit={config.relay.maxAutoTurns}
+                    onSetRelayLimit={(value) => void window.cvmux.setRelayLimit(value)}
                   />
                 </div>
               ))}

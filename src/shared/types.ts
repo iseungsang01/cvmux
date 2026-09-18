@@ -283,6 +283,8 @@ export const IPC = {
   RESIZE: 'session:resize',
   /** 분할선 양쪽 두 세션 사이의 전달 방향을 정한다. P29-2 */
   SET_RELAY: 'session:set-relay',
+  /** ⇄의 연속 전달 상한을 설정 파일에 적는다. P29-6 */
+  SET_RELAY_LIMIT: 'config:set-relay-limit',
   SET_TITLE: 'session:set-title',
   MARK_READ: 'session:mark-read',
   CONFIRM_PASTE: 'app:confirm-paste',
@@ -412,6 +414,8 @@ export interface CvmuxApi {
   write(id: string, data: string): Promise<boolean>
   /** a가 왼쪽(위), b가 오른쪽(아래) 세션. P29-2 */
   setRelay(a: string, b: string, mode: RelayMode): Promise<boolean>
+  /** 사람 입력 없이 자동으로 넘기는 연속 횟수 상한 (1~1000). P29-6 */
+  setRelayLimit(value: number): Promise<boolean>
   resize(id: string, cols: number, rows: number): Promise<boolean>
   setTitle(id: string, title: string | null): Promise<boolean>
   markRead(id: string): Promise<boolean>

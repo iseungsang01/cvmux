@@ -49,6 +49,7 @@ const api: CvmuxApi = {
   wake: (id) => ipcRenderer.invoke(IPC.WAKE, id) as Promise<boolean>,
   write: (id, data) => ipcRenderer.invoke(IPC.WRITE, id, data) as Promise<boolean>,
   setRelay: (a, b, mode) => ipcRenderer.invoke(IPC.SET_RELAY, a, b, mode) as Promise<boolean>,
+  setRelayLimit: (value) => ipcRenderer.invoke(IPC.SET_RELAY_LIMIT, value) as Promise<boolean>,
   resize: (id, cols, rows) => ipcRenderer.invoke(IPC.RESIZE, id, cols, rows) as Promise<boolean>,
   setTitle: (id, title) => ipcRenderer.invoke(IPC.SET_TITLE, id, title) as Promise<boolean>,
   markRead: (id) => ipcRenderer.invoke(IPC.MARK_READ, id) as Promise<boolean>,

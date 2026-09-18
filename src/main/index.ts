@@ -89,6 +89,9 @@ const inbox = new NotificationStore(() => {
  */
 const configStore = new ConfigStore((snapshot) => {
   broadcast(IPC.EVT_CONFIG, snapshot.config)
+  // 파일을 고치기만 해도 세션 쪽 설정(셸, 전달 상한)까지 바뀌어야 한다 — 전에는
+  // `cvmux config reload`를 불러야만 닿았다. P22-4
+  manager.setDefaults(snapshot.config)
   for (const problem of snapshot.problems) {
     console.warn(`[cvmux] 설정 ${problem.path || '(최상위)'}: ${problem.message}`)
   }
@@ -516,7 +519,7 @@ if (!app.requestSingleInstanceLock()) {
         }
       },
       inbox,
-      () => configStore.current.config,
+      configStore,
       browsers,
       workspaceMeta,
       updater,

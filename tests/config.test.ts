@@ -7,6 +7,11 @@
  *
  * 실행: npm test
  */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { ConfigStore } from '../src/core/config-store'
 import { DEFAULT_CONFIG, parseConfig, parseJsonc } from '../src/shared/config'
 import { actionFor, compileBindings, formatChord, parseChord } from '../src/shared/keys'
 
@@ -202,6 +207,49 @@ function main(): void {
       ctrlOnly.every(([, chord]) => chord?.code === 'Tab'),
       ctrlOnly.map(([a]) => a).join(',')
     )
+  }
+
+  /*
+   * 화면에서 바꾼 값도 설정 파일에 적힌다 (P29-6).
+   *
+   * 사람이 쓰는 파일이라 주석과 다른 값이 그대로 남아야 한다. 읽지 못하는
+   * 파일은 고치지 않는다 — 망가진 파일 위에 덧쓰면 무엇이 사람의 것이었는지
+   * 알 수 없게 된다.
+   */
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'cvmux-config-'))
+    const previous = process.env.APPDATA
+    process.env.APPDATA = dir
+    mkdirSync(join(dir, 'cvmux'))
+    const file = join(dir, 'cvmux', 'cvmux.json')
+    writeFileSync(file, '{\n  // 내 글꼴\n  "terminal": { "fontSize": 15 },\n}\n')
+
+    const store = new ConfigStore(() => {})
+    store.load()
+    const after = store.set(['relay', 'maxAutoTurns'], 25)
+    check('화면에서 바꾼 상한이 파일에 적힌다', after.config.relay.maxAutoTurns === 25, readFileSync(file, 'utf8'))
+    check('주석은 그대로 남는다', readFileSync(file, 'utf8').includes('// 내 글꼴'))
+    check('다른 값도 그대로다', after.config.terminal.fontSize === 15)
+
+    store.set(['relay', 'maxAutoTurns'], 30)
+    check(
+      '다시 바꾸면 그 자리만 바뀐다',
+      readFileSync(file, 'utf8').split('maxAutoTurns').length === 2 &&
+        store.current.config.relay.maxAutoTurns === 30
+    )
+
+    writeFileSync(file, '{ "terminal": ')
+    store.load()
+    let refused = false
+    try {
+      store.set(['relay', 'maxAutoTurns'], 5)
+    } catch {
+      refused = true
+    }
+    check('읽지 못하는 파일은 고치지 않는다', refused && readFileSync(file, 'utf8') === '{ "terminal": ')
+
+    process.env.APPDATA = previous
+    rmSync(dir, { recursive: true, force: true })
   }
 
   console.log(results.join('\n'))

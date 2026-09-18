@@ -41,6 +41,9 @@ interface PaneTreeProps {
   onMoveSurface(paneId: string, from: number, to: number): void
   /** 분할선의 ⇄ — a가 왼쪽(위), b가 오른쪽(아래) 세션. P29-2 */
   onSetRelay(a: string, b: string, mode: RelayMode): void
+  /** 사람 입력 없이 자동으로 넘기는 연속 횟수 상한. ⇄를 우클릭해 바꾼다. P29-6 */
+  relayLimit: number
+  onSetRelayLimit(value: number): void
 }
 
 /**
@@ -185,7 +188,9 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
     onSelectSurface,
     onCloseSurface,
     onMoveSurface,
-    onSetRelay
+    onSetRelay,
+    relayLimit,
+    onSetRelayLimit
   } = props
 
   if (node.kind === 'leaf') {
@@ -264,6 +269,8 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
               onDrag={(delta, minRatio) => onResize(node.id, index, delta, minRatio)}
               relay={relayPair(child, node.children[index + 1], sessions)}
               onSetRelay={onSetRelay}
+              relayLimit={relayLimit}
+              onSetRelayLimit={onSetRelayLimit}
             />
           )}
         </PaneFragment>
@@ -321,7 +328,7 @@ function relayGlyph(mode: RelayMode, direction: 'row' | 'column'): string {
   return row ? '⇄' : '⇅'
 }
 
-function relayTitle(mode: RelayMode, direction: 'row' | 'column'): string {
+function relayTitle(mode: RelayMode, direction: 'row' | 'column', limit: number): string {
   const [ahead, back] = direction === 'row' ? ['오른쪽으로', '왼쪽으로'] : ['아래로', '위로']
   const now =
     mode === 'off'
@@ -331,7 +338,71 @@ function relayTitle(mode: RelayMode, direction: 'row' | 'column'): string {
         : mode === 'backward'
           ? `${back} 넘김`
           : '양쪽으로 넘김'
-  return `옆 에이전트에게 답 넘기기: ${now} — 누르면 바뀝니다 (에이전트가 턴을 끝낼 때마다 마지막 답을 옆 입력창에 넣습니다)`
+  return (
+    `옆 에이전트에게 답 넘기기: ${now} — 누르면 바뀝니다 (에이전트가 턴을 끝낼 때마다 마지막 답을 옆 입력창에 넣습니다)\n` +
+    `우클릭: 연속 전달 상한 바꾸기 (지금 ${limit}번)`
+  )
+}
+
+/**
+ * 연속 전달 상한 편집 (P29-6).
+ *
+ * 값은 설정 파일(relay.maxAutoTurns)에 적힌다 — 파일로 고친 사람과 화면에서
+ * 고친 사람이 같은 값을 본다. Enter나 다른 곳을 누르면 저장, Esc는 취소.
+ */
+function RelayLimitEditor({
+  limit,
+  onSave,
+  onClose
+}: {
+  limit: number
+  onSave(value: number): void
+  onClose(): void
+}): JSX.Element {
+  const [text, setText] = useState(String(limit))
+  // Enter로 저장하고 닫으면 뒤이어 blur가 한 번 더 온다 — 두 번 적지 않는다
+  const done = useRef(false)
+  const value = Number(text)
+  const valid = Number.isInteger(value) && value >= 1 && value <= 1000
+
+  const finish = (save: boolean): void => {
+    if (done.current) return
+    done.current = true
+    if (save && valid && value !== limit) onSave(value)
+    onClose()
+  }
+
+  return (
+    <div
+      className="relay-limit"
+      role="dialog"
+      aria-label="연속 전달 상한"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <label className="relay-limit-row">
+        사람 입력 없이
+        <input
+          type="number"
+          min={1}
+          max={1000}
+          value={text}
+          autoFocus
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            // 앱 단축키와 터미널로 새지 않게 여기서 끝낸다
+            event.stopPropagation()
+            if (event.key === 'Enter') finish(true)
+            if (event.key === 'Escape') finish(false)
+          }}
+          onBlur={() => finish(true)}
+        />
+        번까지 넘깁니다
+      </label>
+      <div className={`relay-limit-hint${valid ? '' : ' is-invalid'}`}>
+        {valid ? '넘으면 두 방향 모두 멈춥니다. 모든 ⇄에 함께 적용됩니다' : '1에서 1000 사이로 적어 주세요'}
+      </div>
+    </div>
+  )
 }
 
 interface DividerProps {
@@ -339,9 +410,19 @@ interface DividerProps {
   onDrag(ratioDelta: number, minRatio: number): void
   relay: RelayPair | null
   onSetRelay(a: string, b: string, mode: RelayMode): void
+  relayLimit: number
+  onSetRelayLimit(value: number): void
 }
 
-function Divider({ direction, onDrag, relay, onSetRelay }: DividerProps): JSX.Element {
+function Divider({
+  direction,
+  onDrag,
+  relay,
+  onSetRelay,
+  relayLimit,
+  onSetRelayLimit
+}: DividerProps): JSX.Element {
+  const [editingLimit, setEditingLimit] = useState(false)
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
@@ -390,15 +471,26 @@ function Divider({ direction, onDrag, relay, onSetRelay }: DividerProps): JSX.El
         <button
           type="button"
           className={`relay-toggle is-${relay.mode}`}
-          title={relayTitle(relay.mode, direction)}
-          aria-label={relayTitle(relay.mode, direction)}
+          title={relayTitle(relay.mode, direction, relayLimit)}
+          aria-label={relayTitle(relay.mode, direction, relayLimit)}
           aria-pressed={relay.mode !== 'off'}
           // 분할선을 끄는 동작이 시작되지 않게 한다
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => onSetRelay(relay.a, relay.b, NEXT_MODE[relay.mode])}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            setEditingLimit(true)
+          }}
         >
           {relayGlyph(relay.mode, direction)}
         </button>
+      )}
+      {relay && editingLimit && (
+        <RelayLimitEditor
+          limit={relayLimit}
+          onSave={onSetRelayLimit}
+          onClose={() => setEditingLimit(false)}
+        />
       )}
     </div>
   )

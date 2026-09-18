@@ -5,6 +5,7 @@ import type { WorkspaceMetaStore } from '@core/workspace-meta'
 import type { UpdateManager } from './updater'
 import type { WindowRegistry } from './windows'
 import type { PtyManager } from '@core/pty-manager'
+import type { ConfigStore } from '@core/config-store'
 import { POLICY } from '@shared/policy'
 import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
 import {
@@ -12,7 +13,6 @@ import {
   type BrowserAction,
   type BrowserRect,
   type CreateSessionOptions,
-  type CvmuxConfig,
   type TodoItem,
   type Workspace
 } from '@shared/types'
@@ -106,7 +106,8 @@ export function registerIpc(
   notifier: Notifier,
   layout: LayoutStore,
   inbox: NotificationStore,
-  config: () => CvmuxConfig,
+  /** 설정 파일. 화면에서 바꾼 값도 여기에 적는다(P29-6) */
+  config: ConfigStore,
   browsers: BrowserManager,
   meta: WorkspaceMetaStore,
   updater: UpdateManager,
@@ -128,7 +129,24 @@ export function registerIpc(
 ): ControlBridge {
   const bridge = new RendererBridge(windows)
 
-  ipcMain.handle(IPC.CONFIG, () => config())
+  ipcMain.handle(IPC.CONFIG, () => config.current.config)
+
+  /*
+   * ⇄의 연속 전달 상한을 화면에서 바꾼다 (P29-6).
+   *
+   * 설정 파일이 정본이라 그 자리에 적는다. 적고 나면 다시 읽어 모든 창과
+   * 세션 관리자에 돌린다.
+   */
+  ipcMain.handle(IPC.SET_RELAY_LIMIT, (_event, value: unknown) => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 1000) return false
+    try {
+      config.set(['relay', 'maxAutoTurns'], value)
+      return true
+    } catch (error) {
+      console.warn('[cvmux] 전달 상한을 설정 파일에 적지 못했습니다:', error)
+      return false
+    }
+  })
 
   // ── 자동 업데이트 (P26) ─────────────────────────────────────
   ipcMain.handle(IPC.UPDATE_STATE, () => updater.current)

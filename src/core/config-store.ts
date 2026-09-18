@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+// ESM 빌드를 짚어 가져온다. 기본(UMD) 빌드는 동적 require를 써서 esbuild가 묶은 CLI·테스트에서 깨진다
+import { applyEdits, modify } from 'jsonc-parser/lib/esm/main.js'
 
 import {
   DEFAULT_CONFIG,
@@ -104,6 +106,28 @@ export class ConfigStore {
     const snapshot = this.load()
     this.onChange(snapshot)
     return snapshot
+  }
+
+  /**
+   * 값 하나를 설정 파일에 적는다 (P29-6).
+   *
+   * 화면에서 바꾼 값도 설정 파일이 정본이다 — 따로 들고 있으면 파일을 고친 사람과
+   * 화면에서 바꾼 사람이 서로 다른 값을 보게 된다. 사람이 쓰는 파일이라 주석과
+   * 줄 맞춤을 지켜야 하므로 jsonc-parser로 그 자리만 고친다.
+   *
+   * @throws 지금 파일을 읽지 못하는 상태면 고치지 않는다 — 망가진 파일 위에 덧쓰면
+   *         무엇이 사람의 것이었는지 알 수 없게 된다
+   */
+  set(path: Array<string | number>, value: unknown): ConfigSnapshot {
+    if (this.snapshot.problems.some((problem) => problem.path === '')) {
+      throw new Error('설정 파일을 읽을 수 없어 고치지 않았습니다. `cvmux config doctor`로 확인하세요')
+    }
+    const file = this.snapshot.source ?? this.ensureFile()
+    const text = readFileSync(file, 'utf8')
+    const eol = text.includes('\r\n') ? '\r\n' : '\n'
+    const edits = modify(text, path, value, { formattingOptions: { insertSpaces: true, tabSize: 2, eol } })
+    writeFileSync(file, applyEdits(text, edits), 'utf8')
+    return this.reload()
   }
 
   dispose(): void {
