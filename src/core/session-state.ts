@@ -50,6 +50,8 @@ export interface SessionStateHooks {
   onNotify(text: string): void
   /** 셸이 OSC 7로 작업 디렉토리를 보고했을 때 */
   onCwd(cwd: string): void
+  /** 셸이 OSC 133;D로 명령이 끝났다고 알렸을 때 — 그 아래서 돌던 것도 함께 끝났다. P14-14 */
+  onCommandDone(): void
 }
 
 export class SessionState {
@@ -256,6 +258,7 @@ export class SessionState {
       // 명령 종료 — 프롬프트로 돌아온다
       this.commandRunning = false
       if (!this.unread) this.set('idle', 'certain')
+      this.hooks.onCommandDone()
     } else if (kind === 'A' || kind === 'B') {
       this.commandRunning = false
     }

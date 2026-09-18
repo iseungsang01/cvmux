@@ -21,15 +21,17 @@ function check(name: string, ok: boolean, detail = ''): void {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-function make(): { s: SessionState; notes: string[]; cwds: string[] } {
+function make(): { s: SessionState; notes: string[]; cwds: string[]; done: { count: number } } {
   const notes: string[] = []
   const cwds: string[] = []
+  const done = { count: 0 }
   const s = new SessionState({
     onChange: () => {},
     onNotify: (t) => notes.push(t),
-    onCwd: (cwd) => cwds.push(cwd)
+    onCwd: (cwd) => cwds.push(cwd),
+    onCommandDone: () => done.count++
   })
-  return { s, notes, cwds }
+  return { s, notes, cwds, done }
 }
 
 /** 셸 통합이 매 프롬프트마다 내보내는 시퀀스 (pty-manager.ts의 SHELL_INTEGRATION과 같은 모양) */
@@ -403,11 +405,14 @@ async function main(): Promise<void> {
 
   // ── OSC 133: 셸 통합이 있으면 확실한 판정
   {
-    const { s } = make()
+    const { s, done } = make()
     s.ingest('\x1b]133;C\x07')
     check('OSC 133;C → busy(certain)', s.status === 'busy' && s.confidence === 'certain', s.status)
+    check('P14-14 명령 시작은 끝이 아니다', done.count === 0)
     s.ingest('\x1b]133;D;0\x07')
     check('OSC 133;D → idle(certain)', s.status === 'idle' && s.confidence === 'certain', s.status)
+    // 칩을 치울지 볼 기회 — 에이전트를 끄고 프롬프트로 돌아온 순간이 이것이다
+    check('P14-14 133;D가 명령 끝을 알린다', done.count === 1, String(done.count))
     s.dispose()
   }
 

@@ -178,7 +178,10 @@ export class PortProbe {
   private ports: PortMap | null = null
   /** 프로세스 트리 + 이름/시작 시각. 포트와 셸이 같은 스냅샷을 쓴다. P14-5 / P14-13 */
   private tree: ProcessSnapshot = { children: new Map(), info: new Map() }
+  /** 트리를 뜨기 **시작한** 시각 — 뜨는 도중에 버리라는 말이 오면 그 트리도 믿지 않는다 */
   private treeTakenAt = 0
+  /** 이 시각 전에 뜬 트리는 믿지 않는다. P14-14 */
+  private treeInvalidatedAt = 0
   /** 직전 LISTEN PID 집합의 서명 — 바뀌었을 때만 트리를 다시 뜬다. P14-10 */
   private lastSignature = ''
   private failures = 0
@@ -211,20 +214,27 @@ export class PortProbe {
 
       const maxAge = anyBusy ? POLICY.PROCESS_TREE_BUSY_AGE_MS : POLICY.PROCESS_TREE_MAX_AGE_MS
       const signature = [...ports.pids].sort((a, b) => a - b).join(',')
-      const stale = Date.now() - this.treeTakenAt > maxAge
+      const stale =
+        Date.now() - this.treeTakenAt > maxAge || this.treeTakenAt <= this.treeInvalidatedAt
       // 리슨 PID가 그대로면 포트 계산에는 트리도 그대로면 충분하다 — 292ms를
       // 아낀다. 다만 셸은 포트를 열지 않으므로 수명이 따로 필요하다. P14-10 / P14-13
       if (signature !== this.lastSignature || stale) {
+        const startedAt = Date.now()
         const tree = await this.readProcessTree()
         if (tree) {
           this.tree = tree
-          this.treeTakenAt = Date.now()
+          this.treeTakenAt = startedAt
         }
         this.lastSignature = signature
       }
     } finally {
       this.running = false
     }
+  }
+
+  /** 다음 조사에서 프로세스 트리를 새로 뜨게 한다. P14-14 */
+  invalidateTree(): void {
+    this.treeInvalidatedAt = Date.now()
   }
 
   /** 이 세션 아래에서 따로 도는 셸들. 에이전트가 명령을 돌리는 중이라는 신호다. P14-13 */

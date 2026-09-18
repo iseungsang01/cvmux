@@ -81,6 +81,10 @@ port.on('message', (message: ProbeRequest) => {
     git.forget(message.cwd) // P13-7
     return
   }
+  if (message.type === 'refresh-tree') {
+    ports.invalidateTree() // P14-14
+    return
+  }
 
   void (async () => {
     const patches = new Map<string, ProbePatch>()

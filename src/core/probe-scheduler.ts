@@ -36,6 +36,8 @@ export interface ProbePatch {
 export type ProbeRequest =
   | { type: 'probe'; seq: number; targets: ProbeTarget[] }
   | { type: 'forget'; cwd: string }
+  /** 캐시한 프로세스 트리를 버린다. P14-14 */
+  | { type: 'refresh-tree' }
 
 /** 워커 → 메인 */
 export interface ProbeResult {
@@ -98,6 +100,20 @@ export class ProbeScheduler {
   /** 작업 디렉토리가 바뀌었다 — 캐시를 버리고 즉시 다시 본다. P13-7 */
   invalidateCwd(cwd: string): void {
     this.worker?.postMessage({ type: 'forget', cwd } as ProbeRequest)
+    this.wake(0)
+  }
+
+  /**
+   * 프로세스 트리를 새로 떠서 곧바로 다시 본다 (P14-14).
+   *
+   * 유휴 중에 걸어 둔 다음 조사는 15초 뒤라, 그것을 기다리지 않고 당긴다.
+   */
+  refreshTree(): void {
+    this.worker?.postMessage({ type: 'refresh-tree' } as ProbeRequest)
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
     this.wake(0)
   }
 

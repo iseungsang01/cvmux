@@ -269,6 +269,8 @@ class Session {
       notify(id: string, text: string): void
       /** 셸이 디렉토리를 옮겼다 — git 정보를 다시 봐야 한다. P13-7 */
       cwdChanged(previousCwd: string): void
+      /** 칩을 띄워 둔 채 명령이 끝났다 — 프로세스 트리를 다시 봐야 한다. P14-14 */
+      commandDone(): void
     }
   ) {
     const resolved = resolveCwd(options.cwd, defaultCwd)
@@ -297,6 +299,16 @@ class Session {
         this.git = null
         this.emit.cwdChanged(previous)
         this.emit.meta(this.id)
+      },
+      onCommandDone: () => {
+        /*
+         * 명령이 끝났으면 그 아래서 돌던 셸도 끝났다 (P14-14).
+         *
+         * 트리는 유휴 중 60초에 한 번만 다시 뜨므로, 가만두면 에이전트를 끄고
+         * 프롬프트로 돌아와도 칩이 1분 넘게 남는다. 칩이 떠 있을 때만 다시 본다 —
+         * 명령마다 프로세스 트리를 뜰 이유는 없다.
+         */
+        if (this.shells.length > 0) this.emit.commandDone()
       }
     })
   }
@@ -401,6 +413,10 @@ class Session {
     const instant = Date.now() - this.startedAt < POLICY.INSTANT_EXIT_MS
     this.flushOut()
     this.proc = null
+    // 죽은 셸 아래에는 아무것도 없다. 조사는 살아 있는 세션만 보므로 여기서 비우지
+    // 않으면 마지막 칩과 포트가 영영 굳는다. P14-14
+    this.shells = []
+    this.ports = []
     // signal이 있으면 신호 종료, 없으면 정상 종료. P1-2 / P1-3
     if (signal) {
       this.exitCode = null
@@ -713,7 +729,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
         },
         exit: (info) => this.emit('exit', info),
         notify: (id, text) => this.emit('notify', id, text),
-        cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd)
+        cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd),
+        commandDone: () => this.probes.refreshTree()
       }
     )
 
