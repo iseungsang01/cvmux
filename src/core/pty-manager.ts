@@ -21,6 +21,7 @@ import type { CvmuxConfig } from '@shared/config'
 import { resumeCommand } from './agent-sessions'
 import type { PersistedSession } from './store'
 import { installSharedConout } from './shared-conout'
+import { Relay } from './relay'
 
 // 첫 세션을 띄우기 전에 끼워야 한다 — 이미 뜬 세션은 제 Worker를 계속 쓴다. P8-7
 installSharedConout()
@@ -209,6 +210,8 @@ class Session {
   ports: number[] = []
   /** 이 세션 아래에서 따로 도는 셸들. P14-13 */
   shells: string[] = []
+  /** 이 세션의 에이전트가 턴을 끝내면 답을 넘겨받는 세션. P29 */
+  relayTo: string | null = null
   /**
    * 복원만 해 두고 아직 셸을 띄우지 않았다면 그 저장본 (P28-1).
    *
@@ -468,6 +471,7 @@ class Session {
       git: this.git,
       ports: this.ports,
       shells: this.shells,
+      relayTo: this.relayTo,
       createdAt: this.createdAt
     }
   }
@@ -596,9 +600,37 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   /** 복원할 때 에이전트를 이어서 띄울 것인가. P22-8 */
   private autoResume = true
 
+  /**
+   * 옆 pane의 에이전트에게 답 넘기기 (P29).
+   *
+   * 연결은 세션이 들고(`relayTo`, 배치와 함께 저장된다) 언제 어떻게 넣을지는
+   * Relay가 정한다.
+   */
+  readonly relay = new Relay({
+    targetOf: (id) => this.sessions.get(id)?.relayTo ?? null,
+    setTarget: (id, target) => {
+      const session = this.sessions.get(id)
+      if (!session || session.relayTo === target) return
+      session.relayTo = target
+      this.emit('meta', session.toMeta())
+    },
+    statusOf: (id) => {
+      const session = this.sessions.get(id)
+      if (!session) return null
+      return session.dormant ? 'dormant' : session.state.status
+    },
+    inCommand: (id) => this.sessions.get(id)?.state.inCommand ?? false,
+    write: (id, data) => this.sessions.get(id)?.write(data),
+    notify: (id, text) => {
+      this.notify(id, text)
+    }
+  })
+
   constructor(options: PtyManagerOptions = {}) {
     super()
     this.defaultCwd = options.defaultCwd ?? homedir()
+    // 상태가 풀리면 기다리던 답을 넣는다. P29-5
+    this.on('meta', (meta) => this.relay.statusChanged(meta.id))
   }
 
   /**
@@ -620,6 +652,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   setDefaults(config: CvmuxConfig): void {
     this.defaultShell = config.terminal.shell ?? undefined
     this.autoResume = config.terminal.autoResumeAgentSessions
+    this.relay.setMaxAutoTurns(config.relay.maxAutoTurns)
   }
 
   /** git·포트 정보를 주기적으로 채운다. P13 / P14 */
@@ -727,18 +760,25 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   /** 디스크에 남길 형태로 뽑는다. P16-1 */
   serialize(): PersistedSession[] {
-    return [...this.sessions.values()]
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((session) =>
-        // 켜지 않은 세션은 저장본을 그대로 옮겨 적는다. 이름만 그새 바뀌었을 수 있다. P28-6
-        session.saved
-          ? { ...session.saved, title: session.userTitle }
-          : {
-              cwd: session.cwd,
-              // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
-              title: session.userTitle
-            }
-      )
+    const ordered = [...this.sessions.values()].sort((a, b) => a.createdAt - b.createdAt)
+    const indexOf = new Map<string, number>(ordered.map((s, i) => [s.id, i]))
+
+    return ordered.map((session) => {
+      // 전달 연결도 순번으로 적는다 — 세션 id는 복원 때 새로 발급된다. P29-7
+      const target = session.relayTo === null ? undefined : indexOf.get(session.relayTo)
+      const relay = target === undefined ? {} : { relayTo: target }
+      // 켜지 않은 세션은 저장본을 그대로 옮겨 적는다. 이름과 연결만 그새 바뀌었을 수 있다. P28-6
+      if (session.saved) {
+        const { relayTo: _stale, ...saved } = session.saved
+        return { ...saved, title: session.userTitle, ...relay }
+      }
+      return {
+        cwd: session.cwd,
+        // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
+        title: session.userTitle,
+        ...relay
+      }
+    })
   }
 
   /**
@@ -750,7 +790,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
    *          저장된 pane 배치가 세션을 **순번**으로 가리키므로 자리를 맞춰 돌려준다.
    */
   restore(sessions: PersistedSession[]): Array<string | null> {
-    return sessions.map((item) => {
+    const ids = sessions.map((item) => {
       // 상한을 넘으면 조용히 멈춘다. P16-7
       if (this.sessions.size >= POLICY.MAX_SESSIONS) return null
 
@@ -776,6 +816,15 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       const result = this.spawn({ cwd: item.cwd, title: item.title ?? undefined }, item, resume)
       return result.ok && result.session ? result.session.id : null
     })
+
+    // 전달 연결은 모두 자리를 잡은 뒤에 잇는다 — 뒤에 오는 세션을 가리킬 수 있다. P29-7
+    sessions.forEach((item, i) => {
+      const from = ids[i]
+      const to = item.relayTo === undefined ? null : ids[item.relayTo]
+      const session = from ? this.sessions.get(from) : undefined
+      if (session && to && to !== from) session.relayTo = to
+    })
+    return ids
   }
 
   /**
@@ -862,6 +911,11 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const session = this.sessions.get(id)
     if (!session) return false
     this.sessions.delete(id)
+    // 닫힌 세션으로 보내던 연결은 끊는다 — 남겨 두면 저장할 때 허공을 가리킨다. P29
+    for (const other of this.sessions.values()) {
+      if (other.relayTo === id) this.relay.setMode(other.id, id, 'off')
+    }
+    this.relay.forget(id)
     await session.dispose()
     this.emit('closed', id)
     return true

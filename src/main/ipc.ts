@@ -358,9 +358,20 @@ export function registerIpc(
     typeof id === 'string' ? manager.wake(id) : false
   )
 
-  ipcMain.handle(IPC.WRITE, (_event, id: unknown, data: unknown) =>
-    typeof id === 'string' && typeof data === 'string' ? manager.write(id, data) : false
-  )
+  ipcMain.handle(IPC.WRITE, (_event, id: unknown, data: unknown) => {
+    if (typeof id !== 'string' || typeof data !== 'string') return false
+    // 사람이 끼어들면 자동 전달의 핑퐁 횟수를 되돌린다. P29-6
+    manager.relay.noteInput(id, data)
+    return manager.write(id, data)
+  })
+
+  ipcMain.handle(IPC.SET_RELAY, (_event, a: unknown, b: unknown, mode: unknown) => {
+    if (typeof a !== 'string' || typeof b !== 'string') return false
+    if (mode !== 'off' && mode !== 'forward' && mode !== 'backward' && mode !== 'both') return false
+    if (!manager.metaOf(a) || !manager.metaOf(b)) return false
+    manager.relay.setMode(a, b, mode)
+    return true
+  })
 
   ipcMain.handle(IPC.RESIZE, (_event, id: unknown, cols: unknown, rows: unknown) =>
     typeof id === 'string' && typeof cols === 'number' && typeof rows === 'number'

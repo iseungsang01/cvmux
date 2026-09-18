@@ -15,29 +15,81 @@ import { CliError } from './client'
  * 알림을 OSC 대신 이 길로 보내는 이유가 있다. 훅의 stdout은 에이전트가
  * 가져가므로 터미널까지 닿지 않을 때가 있는데, 소켓은 그 영향을 받지 않는다.
  *
- * **자동 설치는 Claude Code만 한다.** 다른 에이전트의 훅 파일 형식을 확인 없이
- * 짐작해서 쓰면 남의 설정을 망가뜨린다. 대신 `cvmux hooks record`는 어느
- * 에이전트든 받으므로, 훅 한 줄만 직접 걸면 같은 것이 동작한다.
+ * **자동 설치는 Claude Code와 Codex만 한다.** 둘은 훅 파일 형식을 문서로 확인했다.
+ * 다른 에이전트의 형식을 확인 없이 짐작해서 쓰면 남의 설정을 망가뜨린다. 대신
+ * `cvmux hooks record`는 어느 에이전트든 받으므로, 훅 한 줄만 직접 걸면 된다.
  */
-
-/** 우리가 넣은 항목이라는 표시. 지울 때 남의 훅과 구분하는 유일한 근거다 */
-const MARK = '_cvmux'
 
 interface HookEntry {
   matcher?: string
-  hooks: Array<{ type: string; command: string }>
-  [MARK]?: boolean
+  hooks?: Array<{ type?: string; command?: unknown; timeout?: number }>
+  [key: string]: unknown
 }
 
-function claudeSettingsPath(): string {
-  return join(homedir(), '.claude', 'settings.json')
+export type HookAgent = 'claude' | 'codex'
+
+/**
+ * 에이전트마다 훅 파일 자리와 걸 명령 (P22-7 / P29-8).
+ *
+ * 둘 다 `{ "hooks": { 이벤트: [{ matcher?, hooks: [{ type, command }] }] } }` 모양이다.
+ * 훅은 세션 안에서 돌므로 `cvmux`가 PATH에 있다. Stop 훅이 에이전트의 마지막
+ * 답을 싣고 오고, 그것이 옆 pane으로 넘기는 재료다(P29-1).
+ *
+ * Codex에는 Notification이 없다. 권한을 묻는 자리(PermissionRequest)는 답을
+ * 표준 출력으로 기대하므로 걸지 않는다 — 잘못 답하면 에이전트가 멈춘다.
+ */
+const AGENT_HOOKS: Record<HookAgent, { path(): string; events: Record<string, string>; matcher: boolean }> = {
+  claude: {
+    path: () => join(homedir(), '.claude', 'settings.json'),
+    events: {
+      SessionStart: 'cvmux hooks record --agent claude',
+      Notification: 'cvmux hooks notify --agent claude',
+      Stop: 'cvmux hooks notify --agent claude --stop'
+    },
+    matcher: true
+  },
+  codex: {
+    path: () => join(homedir(), '.codex', 'hooks.json'),
+    events: {
+      SessionStart: 'cvmux hooks record --agent codex',
+      Stop: 'cvmux hooks notify --agent codex --stop'
+    },
+    matcher: false
+  }
 }
 
-/** Claude Code가 부를 명령. 세션 안에서 도는 훅이므로 `cvmux`가 PATH에 있다 */
-const CLAUDE_HOOKS: Record<string, string> = {
-  SessionStart: 'cvmux hooks record --agent claude',
-  Notification: 'cvmux hooks notify --agent claude',
-  Stop: 'cvmux hooks notify --agent claude --stop'
+export function isHookAgent(agent: string): agent is HookAgent {
+  return agent === 'claude' || agent === 'codex'
+}
+
+/**
+ * 우리가 건 훅인가.
+ *
+ * 표시용 키를 따로 두지 않고 명령으로 알아본다. Codex가 모르는 키를 받아 줄지
+ * 확인할 길이 없고, 사용자가 손으로 건 `cvmux hooks …`도 결국 같은 것이다.
+ */
+function isOurs(command: unknown): boolean {
+  return typeof command === 'string' && command.trim().startsWith('cvmux hooks ')
+}
+
+/** 우리 훅만 걷어낸다. 한 항목에 사용자의 훅이 섞여 있으면 그것은 남긴다 */
+function withoutOurs(list: unknown): { kept: unknown[]; removed: number } {
+  if (!Array.isArray(list)) return { kept: [], removed: 0 }
+  const kept: unknown[] = []
+  let removed = 0
+  for (const entry of list) {
+    const hooks = (entry as HookEntry | null)?.hooks
+    if (!Array.isArray(hooks)) {
+      kept.push(entry)
+      continue
+    }
+    const others = hooks.filter((hook) => !isOurs(hook?.command))
+    removed += hooks.length - others.length
+    // 옛 설치가 남긴 표시도 함께 걷는다
+    const { _cvmux: _legacy, ...rest } = entry as HookEntry
+    if (others.length > 0) kept.push({ ...rest, hooks: others })
+  }
+  return { kept, removed }
 }
 
 export interface HookResult {
@@ -47,47 +99,52 @@ export interface HookResult {
   note?: string
 }
 
-export function installClaude(): HookResult {
-  const path = claudeSettingsPath()
-  const settings = readJson(path)
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown>
+export function installHooks(agent: HookAgent): HookResult {
+  const spec = AGENT_HOOKS[agent]
+  const path = spec.path()
+  const file = readJson(path)
+  const hooks = (file.hooks ?? {}) as Record<string, unknown>
 
-  for (const [event, command] of Object.entries(CLAUDE_HOOKS)) {
-    const existing = Array.isArray(hooks[event]) ? (hooks[event] as HookEntry[]) : []
+  for (const [event, command] of Object.entries(spec.events)) {
     // 우리 것만 걷어내고 다시 넣는다 — 사용자가 직접 건 훅은 그대로 둔다
-    const others = existing.filter((entry) => entry?.[MARK] !== true)
-    others.push({ matcher: '', [MARK]: true, hooks: [{ type: 'command', command }] })
-    hooks[event] = others
+    const hook = { type: 'command', command }
+    const entry = spec.matcher ? { matcher: '', hooks: [hook] } : { hooks: [hook] }
+    hooks[event] = [...withoutOurs(hooks[event]).kept, entry]
   }
 
-  settings.hooks = hooks
-  writeJson(path, settings)
-  return { agent: 'claude', file: path, action: 'installed' }
+  file.hooks = hooks
+  writeJson(path, file)
+  return {
+    agent,
+    file: path,
+    action: 'installed',
+    // Codex는 새로 생긴 훅을 사람이 한 번 승인해야 돌린다
+    note: agent === 'codex' ? 'Codex 안에서 /hooks를 열어 한 번 승인해야 돕니다' : undefined
+  }
 }
 
-export function uninstallClaude(): HookResult {
-  const path = claudeSettingsPath()
-  if (!existsSync(path)) return { agent: 'claude', file: path, action: 'unchanged', note: '파일 없음' }
+export function uninstallHooks(agent: HookAgent): HookResult {
+  const path = AGENT_HOOKS[agent].path()
+  if (!existsSync(path)) return { agent, file: path, action: 'unchanged', note: '파일 없음' }
 
-  const settings = readJson(path)
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown>
+  const file = readJson(path)
+  const hooks = (file.hooks ?? {}) as Record<string, unknown>
   let removed = 0
 
-  for (const event of Object.keys(CLAUDE_HOOKS)) {
-    if (!Array.isArray(hooks[event])) continue
-    const before = (hooks[event] as HookEntry[]).length
-    const kept = (hooks[event] as HookEntry[]).filter((entry) => entry?.[MARK] !== true)
-    removed += before - kept.length
-    if (kept.length === 0) delete hooks[event]
-    else hooks[event] = kept
+  for (const event of Object.keys(hooks)) {
+    const result = withoutOurs(hooks[event])
+    if (result.removed === 0) continue
+    removed += result.removed
+    if (result.kept.length === 0) delete hooks[event]
+    else hooks[event] = result.kept
   }
 
-  if (Object.keys(hooks).length === 0) delete settings.hooks
-  else settings.hooks = hooks
+  if (Object.keys(hooks).length === 0) delete file.hooks
+  else file.hooks = hooks
 
-  writeJson(path, settings)
+  if (removed > 0) writeJson(path, file)
   return {
-    agent: 'claude',
+    agent,
     file: path,
     action: removed > 0 ? 'removed' : 'unchanged',
     note: removed > 0 ? undefined : '설치된 훅 없음'
@@ -151,23 +208,26 @@ export function hookNotifyText(payload: Record<string, unknown>, stop: boolean):
 }
 
 export function hooksStatus(): string {
-  const path = claudeSettingsPath()
-  if (!existsSync(path)) return `claude   설치되지 않음  (${path} 없음)`
+  return (Object.keys(AGENT_HOOKS) as HookAgent[]).map(agentStatus).join('\n')
+}
+
+function agentStatus(agent: HookAgent): string {
+  const spec = AGENT_HOOKS[agent]
+  const path = spec.path()
+  const name = agent.padEnd(8)
+  if (!existsSync(path)) return `${name} 설치되지 않음  (${path} 없음)`
 
   try {
-    const settings = readJson(path)
-    const hooks = (settings.hooks ?? {}) as Record<string, unknown>
-    const installed = Object.keys(CLAUDE_HOOKS).filter((event) => {
-      const list = hooks[event]
-      return Array.isArray(list) && (list as HookEntry[]).some((e) => e?.[MARK] === true)
-    })
-    return installed.length === Object.keys(CLAUDE_HOOKS).length
-      ? `claude   설치됨  (${path})`
+    const hooks = (readJson(path).hooks ?? {}) as Record<string, unknown>
+    const installed = Object.keys(spec.events).filter((event) => withoutOurs(hooks[event]).removed > 0)
+    const all = Object.keys(spec.events).length
+    return installed.length === all
+      ? `${name} 설치됨  (${path})`
       : installed.length === 0
-        ? `claude   설치되지 않음  (${path})`
-        : `claude   일부만 설치됨: ${installed.join(', ')}  (${path})`
+        ? `${name} 설치되지 않음  (${path})`
+        : `${name} 일부만 설치됨: ${installed.join(', ')}  (${path})`
   } catch (error) {
-    return `claude   읽을 수 없음: ${error instanceof Error ? error.message : String(error)}`
+    return `${name} 읽을 수 없음: ${error instanceof Error ? error.message : String(error)}`
   }
 }
 

@@ -427,6 +427,20 @@ export class ControlSocketServer {
         return { session_id: session.id, text }
       }
 
+      /*
+       * 에이전트가 턴을 끝냈다 (P29-1).
+       *
+       * 훅이 에이전트가 넘겨준 마지막 답을 그대로 싣고 온다. 옆 pane으로 넘길지는
+       * 분할선의 ⇄가 정한다 — 꺼져 있으면 아무 일도 없다.
+       */
+      case M.SESSION_TURN_COMPLETE: {
+        const session = this.session(params.session)
+        const text = typeof params.text === 'string' ? params.text : ''
+        const agent = typeof params.agent === 'string' ? params.agent : null
+        this.host.manager.relay.turnComplete(session.id, text, agent)
+        return { session_id: session.id, relay_to: this.host.manager.metaOf(session.id)?.relayTo ?? null }
+      }
+
       // ── 알림함 (P21) ─────────────────────────────────────────
       case M.NOTIFICATION_LIST: {
         const items = this.host.inbox.list()

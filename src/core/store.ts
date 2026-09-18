@@ -25,6 +25,8 @@ export interface PersistedSession {
    * 같은 순번으로 되살아난다.
    */
   agent?: { name: string; sessionId: string }
+  /** 이 세션의 답을 넘겨받는 세션의 순번 (P29-7). pane 배치처럼 id가 아니라 순번이다 */
+  relayTo?: number
 }
 
 /**
@@ -161,13 +163,21 @@ export class SessionStore {
       sessions.push({
         cwd: s.cwd,
         title: typeof s.title === 'string' ? s.title : null,
-        agent: parseAgentLink(s.agent)
+        agent: parseAgentLink(s.agent),
+        relayTo: typeof s.relayTo === 'number' ? s.relayTo : undefined
       })
     }
 
     // 오래된 것부터 잘라 상한을 지킨다. P16-7
     const kept = sessions.slice(-POLICY.MAX_SESSIONS)
     const dropped = sessions.length - kept.length
+
+    // 전달 연결의 순번도 잘린 만큼 당긴다. 잘려 나간 세션을 가리키면 버린다. P29-7
+    for (const session of kept) {
+      const index = typeof session.relayTo === 'number' ? session.relayTo - dropped : -1
+      if (Number.isInteger(index) && index >= 0 && index < kept.length) session.relayTo = index
+      else delete session.relayTo
+    }
 
     /*
      * 창별 배치 (P27-5).

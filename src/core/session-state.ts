@@ -87,6 +87,16 @@ export class SessionState {
     })
   }
 
+  /**
+   * 프롬프트가 아니라 명령이 돌고 있다고 셸이 알려 주었는가 (P29-4).
+   *
+   * 옆 pane의 답을 붙여 넣어도 되는지의 근거다. 셸 통합이 없으면 알 수 없으므로
+   * false — 모를 때 셸에 붙여 넣으면 그 답이 명령으로 실행된다.
+   */
+  get inCommand(): boolean {
+    return this.shellIntegration && this.commandRunning
+  }
+
   /** 사이드바에 보여줄 한 줄. 알림이 있으면 알림이 우선. P4-13 */
   get preview(): string {
     const raw = this.notification ?? this.parser.previewLine

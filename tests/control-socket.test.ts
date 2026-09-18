@@ -50,6 +50,7 @@ function meta(id: string, overrides: Partial<SessionMeta> = {}): SessionMeta {
     git: null,
     ports: [],
     shells: [],
+    relayTo: null,
     createdAt: 1,
     ...overrides
   }

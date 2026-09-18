@@ -158,6 +158,8 @@ export const M = {
   SESSION_RESTART: 'session.restart',
   SESSION_SET_TITLE: 'session.set-title',
   SESSION_NOTIFY: 'session.notify',
+  /** 에이전트가 턴을 끝냈다 — Stop 훅이 마지막 답과 함께 부른다. P29-1 */
+  SESSION_TURN_COMPLETE: 'session.turn-complete',
 
   WORKSPACE_LIST: 'workspace.list',
   WORKSPACE_CREATE: 'workspace.create',

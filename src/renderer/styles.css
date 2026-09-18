@@ -822,6 +822,48 @@ kbd {
   opacity: 0.8;
 }
 
+/* 분할선 가운데의 ⇄ — 옆 에이전트에게 답 넘기기 (P29-2) */
+.relay-toggle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-sidebar);
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.relay-toggle:hover,
+.divider:hover .relay-toggle {
+  opacity: 1;
+}
+
+.relay-toggle:hover {
+  color: var(--text);
+}
+
+/* 켜져 있으면 늘 보인다 — 자동으로 넘기고 있다는 것을 잊으면 안 된다 */
+.relay-toggle:not(.is-off) {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-row-active);
+}
+
 .pane {
   position: relative;
   overflow: hidden;

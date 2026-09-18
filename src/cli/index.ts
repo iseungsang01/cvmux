@@ -8,11 +8,12 @@ import { HELP, VERSION, commandHelp } from './help'
 import {
   hookNotifyText,
   hooksStatus,
-  installClaude,
+  installHooks,
+  isHookAgent,
   readHookPayload,
   recordSession,
   resumableAgents,
-  uninstallClaude
+  uninstallHooks
 } from './hooks'
 import { render } from './render'
 
@@ -168,32 +169,33 @@ async function runHooks(args: string[], flags: Map<string, string | true>): Prom
   switch (sub) {
     case 'setup':
     case 'install': {
-      if (agent !== 'claude') {
+      if (!isHookAgent(agent)) {
         process.stderr.write(
-          `cvmux: ${agent}는 자동 설치를 지원하지 않습니다.\n` +
+          `cvmux: ${agent}는 자동 설치를 지원하지 않습니다 (claude, codex만).\n` +
             '훅 형식을 확인 없이 짐작해 쓰면 남의 설정을 망가뜨립니다.\n' +
             `대신 그 에이전트의 훅에 이 한 줄을 직접 걸면 같은 것이 동작합니다:\n` +
             `  cvmux hooks record --agent ${agent}\n`
         )
         return 1
       }
-      const result = installClaude()
+      const result = installHooks(agent)
       process.stdout.write(
-        `claude 훅을 설치했습니다 → ${result.file}\n` +
+        `${agent} 훅을 설치했습니다 → ${result.file}\n` +
+          (result.note ? `${result.note}\n` : '') +
           `이어서 띄우기를 지원하는 에이전트: ${resumableAgents()}\n`
       )
       return 0
     }
 
     case 'uninstall': {
-      if (agent !== 'claude') {
-        process.stderr.write(`cvmux: ${agent}는 자동 설치를 지원하지 않습니다.\n`)
+      if (!isHookAgent(agent)) {
+        process.stderr.write(`cvmux: ${agent}는 자동 설치를 지원하지 않습니다 (claude, codex만).\n`)
         return 1
       }
-      const result = uninstallClaude()
+      const result = uninstallHooks(agent)
       process.stdout.write(
         result.action === 'removed'
-          ? `claude 훅을 제거했습니다 → ${result.file}\n`
+          ? `${agent} 훅을 제거했습니다 → ${result.file}\n`
           : `제거할 훅이 없습니다 (${result.note ?? ''}).\n`
       )
       return 0
@@ -212,7 +214,8 @@ async function runHooks(args: string[], flags: Map<string, string | true>): Prom
 
     case 'notify': {
       const payload = await readHookPayload()
-      const text = hookNotifyText(payload, flags.get('stop') === true)
+      const stop = flags.get('stop') === true
+      const text = hookNotifyText(payload, stop)
       // 세션 id도 함께 갱신한다 — 알림 훅이 SessionStart보다 먼저 올 수 있다
       recordSession(agent, payload)
 
@@ -220,11 +223,32 @@ async function runHooks(args: string[], flags: Map<string, string | true>): Prom
         const endpoint = resolveEndpoint({})
         const client = new ControlClient(endpoint)
         await client.connect()
-        await client.call(M.SESSION_NOTIFY, {
-          session: process.env.CVMUX_SESSION_ID,
-          title: agent === 'claude' ? 'Claude Code' : agent,
-          text
-        })
+
+        /*
+         * 턴이 끝났으면 마지막 답을 앱에 넘긴다 (P29-1).
+         *
+         * 옆 pane으로 보낼지는 앱이 정한다. 보냈다면 "응답을 마쳤습니다"는
+         * 띄우지 않는다 — 그 답은 사람이 아니라 옆 에이전트의 차례다. 자동으로
+         * 주고받는 동안 턴마다 토스트가 뜨면 소음이다.
+         */
+        let relayed = false
+        const reply = payload.last_assistant_message
+        if (stop && typeof reply === 'string' && reply.trim() !== '') {
+          const result = (await client.call(M.SESSION_TURN_COMPLETE, {
+            session: process.env.CVMUX_SESSION_ID,
+            agent,
+            text: reply
+          })) as { relay_to?: string | null }
+          relayed = typeof result?.relay_to === 'string'
+        }
+
+        if (!relayed) {
+          await client.call(M.SESSION_NOTIFY, {
+            session: process.env.CVMUX_SESSION_ID,
+            title: agent === 'claude' ? 'Claude Code' : agent,
+            text
+          })
+        }
         client.close()
       } catch (error) {
         // 앱이 꺼져 있으면 알릴 곳이 없다. 그래도 에이전트를 멈추지는 않는다
@@ -232,6 +256,8 @@ async function runHooks(args: string[], flags: Map<string, string | true>): Prom
           `cvmux: 알림을 보내지 못했습니다 (${error instanceof Error ? error.message : String(error)})\n`
         )
       }
+      // Codex의 Stop 훅은 표준 출력이 JSON이어야 한다. 빈 객체는 "하던 대로"다. P29-8
+      if (stop) process.stdout.write('{}\n')
       return 0
     }
 

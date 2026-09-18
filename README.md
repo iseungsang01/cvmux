@@ -28,6 +28,7 @@ macOS를 쓴다면 cmux가 낫다.
 - **분할·탭·여러 창**, **트레이 상주** — 창을 닫아도 세션은 계속 돈다
 - **복원** — 껐다 켜면 배치·작업 디렉토리·이름이 돌아오고 에이전트 대화도 이어서 뜬다
 - **`cvmux` CLI** — 세션 안에서 워크스페이스·pane·입력·화면을 조종한다
+- **에이전트끼리 답 넘기기** — 분할선의 ⇄를 켜면 Claude Code와 Codex가 서로의 답을 받아 일한다
 - **내장 브라우저** — 에이전트가 자기가 고친 화면을 직접 조작해 확인한다
 - 명령 팔레트 · 전체 세션 검색 · 설정 파일 · 자동 업데이트 · 한글 UTF-8 · 트루컬러
 
@@ -107,8 +108,25 @@ cvmux hooks setup      # 설치 (status / uninstall)
 
 확인을 기다릴 때 알림이 오고, 대화 id가 기록돼 앱을 껐다 켜면 그 셸에서
 `claude --resume <id>`가 이어서 뜬다(`terminal.autoResumeAgentSessions: false`로 끈다).
-다른 에이전트는 훅에 `cvmux hooks record --agent codex` 한 줄을 직접 건다 —
-이어서 띄우기는 claude · codex · gemini · copilot · cursor · codebuddy · factory · qoder를 안다.
+Codex는 `cvmux hooks setup --agent codex`. 그 밖의 에이전트는 훅에
+`cvmux hooks record --agent <이름>` 한 줄을 직접 건다 — 이어서 띄우기는
+claude · codex · gemini · copilot · cursor · codebuddy · factory · qoder를 안다.
+
+**옆 에이전트에게 답 넘기기** — 화면을 나눠 왼쪽에 Claude Code, 오른쪽에 Codex를
+띄우고 분할선 가운데의 **⇄**를 누른다. 누를 때마다 끔 → 오른쪽으로(→) →
+왼쪽으로(←) → 양쪽(⇄)으로 바뀐다. 켜 두면 한쪽이 답을 끝낼 때마다 그 답이 옆
+입력창에 들어가 보내진다.
+
+```powershell
+cvmux hooks setup                  # Claude Code
+cvmux hooks setup --agent codex    # Codex — 그다음 Codex 안에서 /hooks로 한 번 승인
+```
+
+- 넘기는 것은 에이전트가 훅으로 알려 준 **마지막 답**이다(화면을 긁지 않는다)
+- 옆 칸이 셸 프롬프트면 넣지 않는다 — 답이 명령으로 실행되면 안 된다
+- 옆 에이전트가 일하는 중이거나 권한을 묻는 중이면 끝날 때까지 기다린다
+- 사람 입력 없이 10번 이어지면 스스로 꺼진다(`relay.maxAutoTurns`). 한 번 끼어들면 다시 센다
+- 켜 둔 연결은 앱을 다시 켜도 남는다
 
 **알림 보내기** — 스크립트나 훅에서:
 
@@ -172,6 +190,7 @@ cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
   "sidebar": { "width": 300 },
   "theme": { "background": "#0d1016", "blue": "#7aa2f7" },
   "keybindings": { "view.palette": "Alt+Shift+P" },
+  "relay": { "maxAutoTurns": 10 },   // 옆 에이전트에게 자동으로 넘기는 연속 횟수 상한
   "update": { "enabled": true }
 }
 ```

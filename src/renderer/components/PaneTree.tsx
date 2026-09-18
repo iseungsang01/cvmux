@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 
-import type { BrowserMeta, PaneNode, SessionMeta } from '@shared/types'
+import type { BrowserMeta, PaneNode, RelayMode, SessionMeta } from '@shared/types'
 import { exitLabel, isFailedExit } from '../lib/format'
 import type { TerminalHost } from '../terminal-host'
 import { BrowserPane } from './BrowserPane'
@@ -39,6 +39,8 @@ interface PaneTreeProps {
   onCloseSurface(surfaceId: string): void
   /** 탭을 끌어 자리를 바꾼다. P24-3 */
   onMoveSurface(paneId: string, from: number, to: number): void
+  /** 분할선의 ⇄ — a가 왼쪽(위), b가 오른쪽(아래) 세션. P29-2 */
+  onSetRelay(a: string, b: string, mode: RelayMode): void
 }
 
 /**
@@ -182,7 +184,8 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
     onResize,
     onSelectSurface,
     onCloseSurface,
-    onMoveSurface
+    onMoveSurface,
+    onSetRelay
   } = props
 
   if (node.kind === 'leaf') {
@@ -259,6 +262,8 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
             <Divider
               direction={node.direction}
               onDrag={(delta, minRatio) => onResize(node.id, index, delta, minRatio)}
+              relay={relayPair(child, node.children[index + 1], sessions)}
+              onSetRelay={onSetRelay}
             />
           )}
         </PaneFragment>
@@ -272,12 +277,71 @@ function PaneFragment({ children }: { children: React.ReactNode }): JSX.Element 
   return <>{children}</>
 }
 
+/**
+ * 분할선 양쪽의 두 세션 (P29-2).
+ *
+ * 양쪽이 모두 터미널 잎일 때만 ⇄를 단다. 한쪽이 다시 나뉘어 있으면 어느 칸과
+ * 잇는지 분할선만 보고는 알 수 없다. 잇는 것은 그 순간 보이는 탭의 세션이고,
+ * 연결은 세션을 따라간다 — 탭을 바꿔도 끊기지 않는다.
+ */
+interface RelayPair {
+  a: string
+  b: string
+  mode: RelayMode
+}
+
+function relayPair(
+  left: PaneNode,
+  right: PaneNode,
+  sessions: Map<string, SessionMeta>
+): RelayPair | null {
+  const end = (node: PaneNode): SessionMeta | null =>
+    node.kind === 'leaf' ? (sessions.get(node.surfaces[node.active]) ?? null) : null
+  const a = end(left)
+  const b = end(right)
+  if (!a || !b) return null
+  const forward = a.relayTo === b.id
+  const backward = b.relayTo === a.id
+  const mode: RelayMode = forward && backward ? 'both' : forward ? 'forward' : backward ? 'backward' : 'off'
+  return { a: a.id, b: b.id, mode }
+}
+
+/** 누를 때마다 끔 → 오른쪽(아래)으로 → 왼쪽(위)으로 → 양방향. P29-2 */
+const NEXT_MODE: Record<RelayMode, RelayMode> = {
+  off: 'forward',
+  forward: 'backward',
+  backward: 'both',
+  both: 'off'
+}
+
+function relayGlyph(mode: RelayMode, direction: 'row' | 'column'): string {
+  const row = direction === 'row'
+  if (mode === 'forward') return row ? '→' : '↓'
+  if (mode === 'backward') return row ? '←' : '↑'
+  return row ? '⇄' : '⇅'
+}
+
+function relayTitle(mode: RelayMode, direction: 'row' | 'column'): string {
+  const [ahead, back] = direction === 'row' ? ['오른쪽으로', '왼쪽으로'] : ['아래로', '위로']
+  const now =
+    mode === 'off'
+      ? '꺼짐'
+      : mode === 'forward'
+        ? `${ahead} 넘김`
+        : mode === 'backward'
+          ? `${back} 넘김`
+          : '양쪽으로 넘김'
+  return `옆 에이전트에게 답 넘기기: ${now} — 누르면 바뀝니다 (에이전트가 턴을 끝낼 때마다 마지막 답을 옆 입력창에 넣습니다)`
+}
+
 interface DividerProps {
   direction: 'row' | 'column'
   onDrag(ratioDelta: number, minRatio: number): void
+  relay: RelayPair | null
+  onSetRelay(a: string, b: string, mode: RelayMode): void
 }
 
-function Divider({ direction, onDrag }: DividerProps): JSX.Element {
+function Divider({ direction, onDrag, relay, onSetRelay }: DividerProps): JSX.Element {
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
@@ -321,7 +385,22 @@ function Divider({ direction, onDrag }: DividerProps): JSX.Element {
       onPointerDown={onPointerDown}
       role="separator"
       aria-orientation={direction === 'row' ? 'vertical' : 'horizontal'}
-    />
+    >
+      {relay && (
+        <button
+          type="button"
+          className={`relay-toggle is-${relay.mode}`}
+          title={relayTitle(relay.mode, direction)}
+          aria-label={relayTitle(relay.mode, direction)}
+          aria-pressed={relay.mode !== 'off'}
+          // 분할선을 끄는 동작이 시작되지 않게 한다
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => onSetRelay(relay.a, relay.b, NEXT_MODE[relay.mode])}
+        >
+          {relayGlyph(relay.mode, direction)}
+        </button>
+      )}
+    </div>
   )
 }
 

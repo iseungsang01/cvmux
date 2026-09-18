@@ -78,8 +78,17 @@ export interface SessionMeta {
    * 세션 셸 하나뿐이라는 뜻이다.
    */
   shells: string[]
+  /** 이 세션의 에이전트가 턴을 끝내면 답을 넘겨받는 세션. P29 */
+  relayTo: string | null
   createdAt: number
 }
+
+/**
+ * 분할선 양쪽 두 세션 사이의 전달 방향 (P29-2).
+ *
+ * 왼쪽(위)을 a, 오른쪽(아래)을 b라 할 때 forward는 a → b, backward는 b → a다.
+ */
+export type RelayMode = 'off' | 'forward' | 'backward' | 'both'
 
 /**
  * 내장 브라우저 화면 하나 (P23).
@@ -272,6 +281,8 @@ export const IPC = {
   WAKE: 'session:wake',
   WRITE: 'session:write',
   RESIZE: 'session:resize',
+  /** 분할선 양쪽 두 세션 사이의 전달 방향을 정한다. P29-2 */
+  SET_RELAY: 'session:set-relay',
   SET_TITLE: 'session:set-title',
   MARK_READ: 'session:mark-read',
   CONFIRM_PASTE: 'app:confirm-paste',
@@ -399,6 +410,8 @@ export interface CvmuxApi {
   /** 복원만 해 둔 세션의 셸을 띄운다. 이미 켜져 있으면 false. P28-2 */
   wake(id: string): Promise<boolean>
   write(id: string, data: string): Promise<boolean>
+  /** a가 왼쪽(위), b가 오른쪽(아래) 세션. P29-2 */
+  setRelay(a: string, b: string, mode: RelayMode): Promise<boolean>
   resize(id: string, cols: number, rows: number): Promise<boolean>
   setTitle(id: string, title: string | null): Promise<boolean>
   markRead(id: string): Promise<boolean>

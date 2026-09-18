@@ -1313,6 +1313,7 @@ export function App(): JSX.Element {
                     onSelectSurface={handleSelectSurface}
                     onCloseSurface={closeSurface}
                     onMoveSurface={handleMoveSurface}
+                    onSetRelay={(a, b, mode) => void window.cvmux.setRelay(a, b, mode)}
                   />
                 </div>
               ))}

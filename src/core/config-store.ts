@@ -154,6 +154,12 @@ const TEMPLATE = `{
     // "fontSize": 13
   },
 
+  // 분할선의 ⇄로 옆 pane의 에이전트에게 답을 넘길 때
+  "relay": {
+    // 사람 입력 없이 자동 전달이 이만큼 이어지면 스스로 멈춘다
+    // "maxAutoTurns": 10
+  },
+
   // 터미널 색. #rrggbb 형태만 받는다
   "theme": {
     // "background": "#0d1016",

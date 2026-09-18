@@ -66,9 +66,16 @@ export interface UpdateConfig {
   enabled: boolean
 }
 
+/** 옆 pane의 에이전트에게 답 넘기기. P29 */
+export interface RelayConfig {
+  /** 사람 입력 없이 자동 전달이 이만큼 이어지면 멈춘다. P29-6 */
+  maxAutoTurns: number
+}
+
 export interface CvmuxConfig {
   terminal: TerminalConfig
   update: UpdateConfig
+  relay: RelayConfig
   sidebar: SidebarConfig
   theme: ThemeConfig
   keybindings: KeybindingConfig
@@ -157,6 +164,7 @@ export const DEFAULT_CONFIG: CvmuxConfig = {
   },
   sidebar: { width: 264, fontSize: 13 },
   update: { enabled: true },
+  relay: { maxAutoTurns: 10 },
   theme: DEFAULT_THEME,
   keybindings: DEFAULT_KEYBINDINGS
 }
@@ -184,6 +192,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
     terminal: { ...DEFAULT_CONFIG.terminal },
     sidebar: { ...DEFAULT_CONFIG.sidebar },
     update: { ...DEFAULT_CONFIG.update },
+    relay: { ...DEFAULT_CONFIG.relay },
     theme: { ...DEFAULT_THEME },
     keybindings: { ...DEFAULT_KEYBINDINGS }
   }
@@ -197,7 +206,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
   const root = raw as Record<string, unknown>
 
   for (const key of Object.keys(root)) {
-    if (!['terminal', 'sidebar', 'theme', 'keybindings', 'update'].includes(key)) {
+    if (!['terminal', 'sidebar', 'theme', 'keybindings', 'update', 'relay'].includes(key)) {
       problems.push({ path: key, message: '모르는 항목입니다' })
     }
   }
@@ -263,6 +272,14 @@ export function parseConfig(raw: unknown): ParsedConfig {
   if (update) {
     bool(update, 'enabled', 'update.enabled', problems, (v) => {
       config.update.enabled = v
+    })
+  }
+
+  // ── relay
+  const relay = section(root.relay, 'relay', problems, Object.keys(DEFAULT_CONFIG.relay))
+  if (relay) {
+    num(relay, 'maxAutoTurns', 'relay.maxAutoTurns', 1, 1000, problems, (v) => {
+      config.relay.maxAutoTurns = Math.floor(v)
     })
   }
 
