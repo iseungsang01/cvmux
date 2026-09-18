@@ -1,6 +1,6 @@
 {
   "name": "cvmux",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "A cmux-inspired terminal workspace manager for Windows — run many PowerShell sessions and watch them all from one sidebar.",
   "author": "iseungsang01",
