@@ -353,6 +353,11 @@ export function registerIpc(
     typeof id === 'string' ? manager.restart(id) : false
   )
 
+  // 복원만 해 둔 세션이 화면에 나왔다. P28-2
+  ipcMain.handle(IPC.WAKE, (_event, id: unknown) =>
+    typeof id === 'string' ? manager.wake(id) : false
+  )
+
   ipcMain.handle(IPC.WRITE, (_event, id: unknown, data: unknown) =>
     typeof id === 'string' && typeof data === 'string' ? manager.write(id, data) : false
   )
@@ -443,7 +448,7 @@ export function registerIpc(
 }
 
 /** 워크스페이스가 품은 세션 전부. 숨은 탭까지 본다(P24-4) */
-function sessionIdsOf(workspace: Workspace): string[] {
+export function sessionIdsOf(workspace: Workspace): string[] {
   const out: string[] = []
   const walk = (node: Workspace['root']): void => {
     if (node.kind === 'leaf') {

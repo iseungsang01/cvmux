@@ -223,6 +223,14 @@ class Session {
   ports: number[] = []
   /** 이 세션 아래에서 따로 도는 셸들. P14-13 */
   shells: string[] = []
+  /**
+   * 복원만 해 두고 아직 셸을 띄우지 않았다면 그 저장본 (P28-1).
+   *
+   * 켜기 전에 다시 저장하면 이것을 그대로 옮겨 적는다(P28-6) — 구분선이 붙은
+   * 재생 버퍼를 적으면 켜지 않고 껐다 켤 때마다 구분선이 한 줄씩 쌓이고,
+   * 훅이 새 id로 다시 적기 전이라 에이전트 연결도 잃는다.
+   */
+  saved: PersistedSession | null = null
 
   private startedAt = 0
   /** 저장된 스크롤백에서 되살아난 세션인가. P16-6 */
@@ -297,6 +305,11 @@ class Session {
     return this.proc !== null
   }
 
+  /** 셸을 한 번도 띄우지 않은 복원 세션인가. P28-1 */
+  get dormant(): boolean {
+    return this.saved !== null
+  }
+
   /** 포트 조사에서 프로세스 트리의 루트로 쓴다. P14-8 */
   get pid(): number | null {
     return this.proc?.pid ?? null
@@ -304,6 +317,7 @@ class Session {
 
   /** PTY를 띄운다. 실패해도 예외를 던지지 않고 세션을 오류 상태로 남긴다. P1-5 */
   start(preferredShell?: string): void {
+    this.saved = null
     const shell = resolveShell(preferredShell || this.shell || undefined)
     if (!shell) {
       this.failToStart('사용 가능한 셸을 찾지 못했습니다. PowerShell 또는 cmd.exe가 필요합니다.')
@@ -470,8 +484,8 @@ class Session {
       userTitle: this.userTitle,
       cwd: this.cwd,
       shell: this.shell,
-      status: this.state.status,
-      confidence: this.state.confidence,
+      status: this.dormant ? 'dormant' : this.state.status,
+      confidence: this.dormant ? 'certain' : this.state.confidence,
       preview: this.state.preview,
       unread: this.state.unread,
       exitCode: this.exitCode,
@@ -673,7 +687,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
 
   private spawn(
     options: CreateSessionOptions,
-    restoredScrollback: string | null,
+    /** 저장본에서 되살리는 세션이면 그 저장본. 셸은 띄우지 않는다. P28-1 */
+    restored: PersistedSession | null,
     resume: string | null = null
   ): CreateSessionResult {
     // 상한 초과는 예외가 아니라 사유가 담긴 실패다. P1-8 / P8-3 / P12
@@ -687,7 +702,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const session = new Session(
       options,
       this.defaultCwd,
-      restoredScrollback,
+      restored?.scrollback || null,
       this.sessionEnv,
       resume,
       {
@@ -703,9 +718,20 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     )
 
     this.sessions.set(session.id, session)
-    session.start(this.defaultShell)
-    // 세션이 없는 동안 프로브는 자고 있다. P14-6
-    this.probes.wake()
+    if (restored) {
+      /*
+       * 복원한 세션은 자리만 잡아 둔다 (P28-1).
+       *
+       * 셸 하나가 conhost까지 80MB 남짓이고, 에이전트를 이어서 띄우면 그 몇
+       * 배다. 앱을 켤 때마다 지난번에 열어 둔 것을 전부 띄우면 쓰지도 않을
+       * 세션이 GB 단위로 먹는다. 볼 때(P28-2), 또는 고정해 둔 것만(P28-3) 켠다.
+       */
+      session.saved = restored
+    } else {
+      session.start(this.defaultShell)
+      // 세션이 없는 동안 프로브는 자고 있다. P14-6
+      this.probes.wake()
+    }
 
     const meta = session.toMeta()
     this.emit('created', meta)
@@ -730,16 +756,23 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   serialize(): PersistedSession[] {
     return [...this.sessions.values()]
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map((session) => ({
-        cwd: session.cwd,
-        // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
-        title: session.userTitle,
-        scrollback: trimScrollback(session.replayText)
-      }))
+      .map((session) =>
+        // 켜지 않은 세션은 저장본을 그대로 옮겨 적는다. 이름만 그새 바뀌었을 수 있다. P28-6
+        session.saved
+          ? { ...session.saved, title: session.userTitle }
+          : {
+              cwd: session.cwd,
+              // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
+              title: session.userTitle,
+              scrollback: trimScrollback(session.replayText)
+            }
+      )
   }
 
   /**
    * 저장된 세션을 되살린다. 프로세스가 아니라 자리(작업 디렉토리)와 화면을 복원한다.
+   *
+   * 셸은 띄우지 않는다 — 전부 `dormant`로 돌아오고, `wake()`가 켠다(P28-1).
    *
    * @returns 입력과 같은 길이의 배열. 각 자리에 새 세션 id, 복원하지 못했으면 null.
    *          저장된 pane 배치가 세션을 **순번**으로 가리키므로 자리를 맞춰 돌려준다.
@@ -768,13 +801,23 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
           : null
 
       // 사라진 디렉토리는 resolveCwd가 폴백하고 경고를 남긴다. P16-4
-      const result = this.spawn(
-        { cwd: item.cwd, title: item.title ?? undefined },
-        item.scrollback || null,
-        resume
-      )
+      const result = this.spawn({ cwd: item.cwd, title: item.title ?? undefined }, item, resume)
       return result.ok && result.session ? result.session.id : null
     })
+  }
+
+  /**
+   * 복원만 해 둔 세션의 셸을 띄운다 (P28-2).
+   *
+   * @returns 지금 켰으면 true. 이미 켜져 있거나 없는 세션이면 false
+   */
+  wake(id: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session?.dormant) return false
+    session.start(this.defaultShell)
+    this.probes.wake()
+    this.emit('meta', session.toMeta())
+    return true
   }
 
   /** 저장할 때 pane 배치가 참조할 세션 순서 */
@@ -788,6 +831,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   write(id: string, data: string): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
+    // 입력을 보낸 쪽은 셸이 받기를 기대한다 — 켜지 않은 세션이면 켜고 쓴다. P28-4
+    this.wake(id)
     session.write(data)
     return true
   }
@@ -802,6 +847,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   restart(id: string): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
+    // 켠 적이 없으면 재시작이 곧 켜기다 — 복원한 화면을 지우지 않는다. P28-2
+    if (session.dormant) return this.wake(id)
     const ok = session.restart()
     if (ok) this.probes.wake()
     return ok

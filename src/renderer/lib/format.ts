@@ -105,5 +105,7 @@ export function statusLabel(session: SessionMeta): string {
       return '확인 필요'
     case 'exited':
       return exitLabel(session) ?? '종료됨'
+    case 'dormant':
+      return '꺼져 있음'
   }
 }

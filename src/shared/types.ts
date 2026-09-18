@@ -13,8 +13,9 @@ export type { CvmuxConfig }
  * - `waiting`   명령은 살아 있는데 출력이 멎었다. 일을 끝냈거나 답을 기다린다 (P4-14)
  * - `attention` OSC 9/777/99 또는 BEL로 명시적 알림을 받음 (확실 1순위)
  * - `exited`    프로세스 종료 (확실 2순위)
+ * - `dormant`   복원만 해 두고 아직 셸을 띄우지 않았다 — 보이면 켠다 (P28-1)
  */
-export type SessionStatus = 'busy' | 'idle' | 'waiting' | 'attention' | 'exited'
+export type SessionStatus = 'busy' | 'idle' | 'waiting' | 'attention' | 'exited' | 'dormant'
 
 /** 상태가 확실한 신호에서 왔는지, 휴리스틱 추측인지. P0-3 */
 export type StatusConfidence = 'certain' | 'inferred'
@@ -218,6 +219,12 @@ export interface Workspace {
   root: PaneNode
   /** 마지막으로 포커스된 잎. 워크스페이스로 돌아올 때 이 pane으로 복귀한다. P17-9 */
   focusedPaneId: string
+  /**
+   * 앱을 켤 때 이 워크스페이스의 셸을 함께 띄운다 (P28-3).
+   *
+   * 나머지는 복원만 해 두고 볼 때 켠다 — 쓰지 않는 셸이 하나에 수십 MB씩 먹는다.
+   */
+  autostart?: boolean
 }
 
 export interface CreateSessionOptions {
@@ -261,6 +268,8 @@ export const IPC = {
   CREATE: 'session:create',
   CLOSE: 'session:close',
   RESTART: 'session:restart',
+  /** 복원만 해 둔 세션의 셸을 띄운다. P28-2 */
+  WAKE: 'session:wake',
   WRITE: 'session:write',
   RESIZE: 'session:resize',
   SET_TITLE: 'session:set-title',
@@ -387,6 +396,8 @@ export interface CvmuxApi {
   create(options?: CreateSessionOptions): Promise<CreateSessionResult>
   close(id: string): Promise<boolean>
   restart(id: string): Promise<boolean>
+  /** 복원만 해 둔 세션의 셸을 띄운다. 이미 켜져 있으면 false. P28-2 */
+  wake(id: string): Promise<boolean>
   write(id: string, data: string): Promise<boolean>
   resize(id: string, cols: number, rows: number): Promise<boolean>
   setTitle(id: string, title: string | null): Promise<boolean>

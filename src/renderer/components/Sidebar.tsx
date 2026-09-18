@@ -24,6 +24,7 @@ import { representativeSession, workspaceTitle } from '../lib/workspace'
  *   waiting   빨간 점           떠 있는 채로 조용하다 — 끝났거나 답을 기다린다
  *   idle      회색 빈 원        셸 프롬프트. 아무것도 돌지 않는 빈손 상태
  *   exited    회색 사각         셸이 죽었다 — 상태가 아니라 부재다
+ *   dormant   작은 점선 원      복원만 해 두고 셸을 아직 띄우지 않았다 (P28-1)
  *
  * `waiting`과 `idle`을 가르는 것이 이 화면의 핵심이다(P4-14). 에이전트를
  * 띄워두면 명령은 몇 시간이고 살아 있으므로, "명령이 있다"만으로 초록을
@@ -53,6 +54,8 @@ interface SidebarProps {
   onRenameEnd(): void
   /** 줄 순서 바꾸기. 자리는 배열 위치이고, 그것이 곧 Ctrl+Alt+숫자의 번호다. P19-8 */
   onReorder(from: number, to: number): void
+  /** 앱을 켤 때 함께 켤지 뒤집는다. P28-3 */
+  onToggleAutostart(id: string): void
 }
 
 export function Sidebar({
@@ -70,7 +73,8 @@ export function Sidebar({
   renamingId,
   onRenameStart,
   onRenameEnd,
-  onReorder
+  onReorder,
+  onToggleAutostart
 }: SidebarProps): JSX.Element {
   /*
    * 드래그로 순서 바꾸기 (P19-8).
@@ -133,6 +137,7 @@ export function Sidebar({
             }
             onSelect={onSelect}
             onClose={onClose}
+            onToggleAutostart={onToggleAutostart}
             onRename={onRename}
             onRenameStart={onRenameStart}
             onRenameEnd={onRenameEnd}
@@ -176,6 +181,7 @@ interface WorkspaceRowProps {
   dropEdge: 'above' | 'below' | null
   onSelect(id: string): void
   onClose(id: string): void
+  onToggleAutostart(id: string): void
   onRename(id: string, title: string | null): void
   onRenameStart(id: string): void
   onRenameEnd(): void
@@ -196,6 +202,7 @@ function WorkspaceRow({
   dropEdge,
   onSelect,
   onClose,
+  onToggleAutostart,
   onRename,
   onRenameStart,
   onRenameEnd,
@@ -217,6 +224,7 @@ function WorkspaceRow({
     active ? 'is-active' : '',
     needsAttention ? 'is-attention' : '',
     session.status === 'exited' ? 'is-exited' : '',
+    session.status === 'dormant' ? 'is-dormant' : '',
     dragging ? 'is-dragging' : '',
     dropEdge === 'above' ? 'is-drop-above' : '',
     dropEdge === 'below' ? 'is-drop-below' : ''
@@ -294,6 +302,11 @@ function WorkspaceRow({
               </span>
             )}
             {panes > 1 && <span className="session-panes">⊞{panes}</span>}
+            {workspace.autostart && (
+              <span className="session-pin" aria-label="앱을 켤 때 함께 켬">
+                📌
+              </span>
+            )}
             {index < 8 && <span className="session-index">{index + 1}</span>}
           </div>
 
@@ -320,6 +333,8 @@ function WorkspaceRow({
           >
             {statusLabel(session)}
             {session.status === 'exited' && ' · Enter로 재시작'}
+            {/* 셸이 아직 없다 — 누르면 그때 뜬다. P28-2 */}
+            {session.status === 'dormant' && ' · 누르면 켭니다'}
           </div>
 
           {/* 조치가 필요한 경고만 노출한다. P12-1 / P12-3 */}
@@ -333,6 +348,32 @@ function WorkspaceRow({
           "제목을 수정할 수 있게 해달라"는 요청을 받았을 때 기능은 이미 있었다 —
           없었던 것은 발견할 방법이었다.
         */}
+        {/*
+          앱을 켤 때 함께 켤 줄을 고른다 (P28-3).
+
+          고르지 않은 줄은 셸 없이 자리만 잡고 있다가 볼 때 켜진다. 여기서
+          고른 줄만 앱이 뜨자마자 돈다 — 고르는 순간에도 켠다.
+        */}
+        {!renaming && (
+          <button
+            type="button"
+            className={`session-autostart${workspace.autostart ? ' is-on' : ''}`}
+            title={
+              workspace.autostart
+                ? '앱을 켤 때 함께 켭니다 — 누르면 해제'
+                : '앱을 켤 때 함께 켜기 (나머지는 볼 때 켜집니다)'
+            }
+            aria-label="앱을 켤 때 함께 켜기"
+            aria-pressed={workspace.autostart === true}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleAutostart(workspace.id)
+            }}
+          >
+            📌
+          </button>
+        )}
+
         {!renaming && (
           <button
             type="button"

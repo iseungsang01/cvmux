@@ -16,7 +16,7 @@ import { BrowserManager } from './browser'
 import { ControlSocketServer, type WindowControl, pipePathFor } from './control-socket'
 import { WindowRegistry } from './windows'
 import { UpdateManager } from './updater'
-import { registerIpc } from './ipc'
+import { registerIpc, sessionIdsOf } from './ipc'
 import { Notifier } from './notifier'
 import { createTray, type TrayController } from './tray'
 
@@ -577,10 +577,23 @@ if (!app.requestSingleInstanceLock()) {
       restoredWindows = saved.windows.map((entry) =>
         workspacesFromPersisted(entry.workspaces, ids)
       )
+
+      /*
+       * 고정해 둔 워크스페이스만 지금 켠다 (P28-3).
+       *
+       * 나머지는 셸 없이 자리만 잡고 있다가 화면에 나올 때 켜진다(P28-2).
+       * 숨은 탭까지 켠다 — 고정은 "이 줄은 늘 돌고 있어야 한다"는 뜻이다.
+       */
+      let woken = 0
+      for (const workspace of restoredWindows.flat()) {
+        if (!workspace.autostart) continue
+        for (const id of sessionIdsOf(workspace)) if (manager.wake(id)) woken++
+      }
+
       const count = ids.filter((id) => id !== null).length
       const total = restoredWindows.reduce((n, list) => n + list.length, 0)
       console.log(
-        `[cvmux] 세션 ${count}개, 워크스페이스 ${total}개를 창 ${restoredWindows.length}개에 복원했습니다`
+        `[cvmux] 세션 ${count}개(바로 켠 것 ${woken}개), 워크스페이스 ${total}개를 창 ${restoredWindows.length}개에 복원했습니다`
       )
     }
 

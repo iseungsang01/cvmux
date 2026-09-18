@@ -54,6 +54,8 @@ export interface PersistedWorkspace {
   root: PersistedPane
   /** 포커스된 잎이 가리키는 세션 순번 */
   focusedIndex: number
+  /** 앱을 켤 때 함께 띄운다. P28-3 */
+  autostart?: boolean
 }
 
 /**
@@ -255,7 +257,8 @@ function parseWorkspace(value: unknown, count: number, dropped: number): Persist
   return {
     title: typeof ws.title === 'string' ? ws.title : null,
     root,
-    focusedIndex: focused >= 0 && focused < count ? focused : 0
+    focusedIndex: focused >= 0 && focused < count ? focused : 0,
+    autostart: ws.autostart === true
   }
 }
 
@@ -368,7 +371,8 @@ export function workspacesFromPersisted(
       id: randomUUID(),
       title: entry.title,
       root,
-      focusedPaneId: focusedPaneId ?? firstLeafId(root)
+      focusedPaneId: focusedPaneId ?? firstLeafId(root),
+      autostart: entry.autostart === true
     })
   }
 
@@ -422,7 +426,7 @@ export function workspacesToPersisted(
 
     const root = convert(workspace.root)
     if (!root) continue
-    out.push({ title: workspace.title, root, focusedIndex })
+    out.push({ title: workspace.title, root, focusedIndex, autostart: workspace.autostart === true })
   }
 
   return out

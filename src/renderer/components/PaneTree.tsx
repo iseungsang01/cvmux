@@ -343,14 +343,33 @@ function TerminalPane({
   onFocus
 }: TerminalPaneProps): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null)
+  const dormant = session.status === 'dormant'
+  /*
+   * 켜지 않은 세션은 xterm도 만들지 않는다 (P28-2).
+   *
+   * 셸만 재워 두고 터미널은 세션마다 만들어 두면, 볼 일 없는 스크롤백이
+   * 렌더러 메모리를 그대로 붙든다. 처음 보일 때 만들고 그때 화면을 되살린다.
+   */
+  const shown = visible || !dormant
 
   useEffect(() => {
+    if (!shown) return
     const el = mountRef.current
     if (!el) return
     host.attach(session.id, el)
     // 렌더러가 재시작됐다면 main의 재생 버퍼로 화면을 되살린다. P9-1
     void host.hydrate(session.id)
-  }, [host, session.id])
+  }, [host, session.id, shown])
+
+  /*
+   * 보이는 순간 셸을 띄운다 (P28-2).
+   *
+   * 화면을 되살리는 요청(위)이 먼저 나가야 한다 — 셸이 먼저 뜨면 그 첫 출력이
+   * 재생 버퍼와 실시간 이벤트 양쪽으로 와서 두 번 그려진다.
+   */
+  useEffect(() => {
+    if (visible && dormant) void window.cvmux.wake(session.id)
+  }, [visible, dormant, session.id])
 
   // 보이지 않는 워크스페이스의 터미널은 WebGL 컨텍스트를 놓아준다. P5-10
   useEffect(() => {

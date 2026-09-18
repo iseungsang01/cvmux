@@ -17,7 +17,9 @@ const PRIORITY: Record<SessionStatus, number> = {
   waiting: 4,
   busy: 3,
   idle: 2,
-  exited: 1
+  exited: 1,
+  // 켜지 않은 탭이 켜져 있는 탭을 가리면 안 된다. P28-1
+  dormant: 0
 }
 
 let counter = 0

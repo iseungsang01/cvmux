@@ -600,6 +600,22 @@ export function App(): JSX.Element {
   }, [])
 
   /**
+   * 앱을 켤 때 함께 켤지 (P28-3).
+   *
+   * 고정하는 순간 켠다 — "늘 돌고 있어야 한다"고 표시한 줄이 꺼져 있을 이유가
+   * 없다. 풀어도 끄지는 않는다: 돌던 명령을 죽이는 것은 고정을 푼 뜻이 아니다(P28-5).
+   */
+  const toggleAutostart = useCallback((workspaceId: string): void => {
+    const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+    if (!workspace) return
+    const autostart = !workspace.autostart
+    if (autostart) {
+      for (const surfaceId of collectAllSurfaces(workspace.root)) void window.cvmux.wake(surfaceId)
+    }
+    setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? { ...w, autostart } : w)))
+  }, [])
+
+  /**
    * 사이드바 줄 순서 바꾸기 (P19-8).
    *
    * 배열 위치가 곧 화면의 자리이고 `Ctrl+Alt+숫자`의 번호이므로, 옮기면 번호도
@@ -893,6 +909,16 @@ export function App(): JSX.Element {
         }
       },
       {
+        id: 'workspace.autostart',
+        title: activeWorkspace?.autostart ? '앱을 켤 때 함께 켜기 해제' : '앱을 켤 때 함께 켜기',
+        keywords: 'autostart startup launch pin 고정 시작',
+        section: '세션',
+        enabled: activeId !== null,
+        run: () => {
+          if (activeIdRef.current !== null) toggleAutostart(activeIdRef.current)
+        }
+      },
+      {
         id: 'find.session',
         title: '이 화면에서 찾기',
         keywords: 'find search buffer',
@@ -1017,6 +1043,7 @@ export function App(): JSX.Element {
     return list
   }, [
     activeId,
+    activeWorkspace,
     closeFocusedPane,
     createWorkspace,
     focusedId,
@@ -1032,6 +1059,7 @@ export function App(): JSX.Element {
     sidebarCollapsed,
     update,
     splitFocused,
+    toggleAutostart,
     workspaces
   ])
 
@@ -1233,6 +1261,7 @@ export function App(): JSX.Element {
           onRenameStart={setRenamingId}
           onRenameEnd={() => setRenamingId(null)}
           onReorder={reorderWorkspaces}
+          onToggleAutostart={toggleAutostart}
         />
 
         <main className="main">
