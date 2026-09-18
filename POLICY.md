@@ -388,7 +388,7 @@ pane 분할, 키 입력 전송, 화면 읽기. 그것이 cmux를 "솔루션이 �
 
 | ID | 엣지 케이스 | cmux 동작 | cvmux 정책 | 구현 위치 |
 |----|-------------|-----------|-----------|----------|
-| P20-1 | 앱이 꺼져 있을 때의 CLI | `--help` / `--version`은 소켓 없이 동작 | 같다. 소켓 없이 답할 수 있는 것은 소켓 없이 답한다 — 앱이 꺼졌다고 도움말까지 실패하면 도구로 못 쓴다. CLI는 asar 밖에 두고(ELECTRON_RUN_AS_NODE는 asar를 읽지 못한다) 세션 PATH에 그 폴더를 얹는다. 시스템 PATH는 건드리지 않는다 | `cli/index.ts` / `cli/help.ts` / `pty-manager.ts` |
+| P20-1 | 앱이 꺼져 있을 때의 CLI | `--help` / `--version`은 소켓 없이 동작 | 같다. 소켓 없이 답할 수 있는 것은 소켓 없이 답한다 — 앱이 꺼졌다고 도움말까지 실패하면 도구로 못 쓴다. CLI는 asar 밖에 두고(ELECTRON_RUN_AS_NODE는 asar를 읽지 못한다) 셸 두 벌(`bin/cvmux.cmd`, Git Bash용 `bin/cvmux`)이 있는 **`bin/`만** 세션 PATH에 얹는다. 실행 파일 폴더를 얹으면 PowerShell은 PATHEXT 순서(.EXE가 .CMD보다 앞)대로, Git Bash는 확장자를 붙여 보며 `cvmux.exe`를 잡아 CLI 대신 앱을 띄운다 — 0.1.7까지 설치본의 `cvmux`와 에이전트 훅이 그렇게 헛돌았다. `.cmd`의 주석은 ASCII로만 쓴다(cmd가 콘솔 코드페이지로 읽어 UTF-8 줄을 명령으로 오해한다). 시스템 PATH는 건드리지 않는다 | `cli/index.ts` / `cli/help.ts` / `pty-manager.ts` |
 | P20-2 | 앱을 찾는 방법 | 소켓 경로 + `CMUX_SOCKET_PASSWORD` | 파이프 이름은 userData 경로 해시라 설치마다 다르다. 주소와 비밀번호를 `userData/control.json`에 남기고, 종료할 때 지운다 — 꺼진 앱을 가리키는 주소는 거짓말이다 | `control-socket.ts` |
 | P20-3 | 세션 안에서 부를 때 | `CMUX_WORKSPACE_ID` 등을 주입 | `CVMUX_SOCKET_PATH` · `CVMUX_SOCKET_PASSWORD`를 세션 환경에 심는다. 마지막에 얹으므로 사용자 환경의 같은 이름을 덮는다 — 지금 도는 앱이 언제나 옳다 | `pty-manager.ts` |
 | P20-4 | 대상 지정 | UUID · `workspace:2` · 순번 | 셋 다 받고, 줄여 쓴 id도 접두 일치로 받는다. **여러 개에 걸리면 거부한다** — 하나를 골라 주면 스크립트가 조용히 엉뚱한 것을 닫는다. 인자가 없으면 부르는 쪽의 세션·지금 보고 있는 워크스페이스 | `protocol.ts` / `control.ts` |

@@ -561,9 +561,11 @@ if (!app.requestSingleInstanceLock()) {
     /*
      * 세션 안에서 `cvmux`가 보이게 한다 (P20-1).
      *
-     * 설치본에서는 셸이 실행 파일 옆에, 개발 중에는 저장소의 bin/ 에 있다.
+     * 설치본에서는 실행 파일 옆의 bin/, 개발 중에는 저장소의 bin/ 이다. 실행
+     * 파일이 있는 폴더를 얹으면 안 된다 — PowerShell은 PATHEXT 순서대로
+     * cvmux.exe를 cvmux.cmd보다 먼저 잡아, `cvmux`가 CLI 대신 앱을 띄운다.
      */
-    const cliDir = app.isPackaged ? dirname(app.getPath('exe')) : join(app.getAppPath(), 'bin')
+    const cliDir = join(app.isPackaged ? dirname(app.getPath('exe')) : app.getAppPath(), 'bin')
     manager.setSessionEnv({ ...control.env, [CLI_DIR_KEY]: cliDir })
 
     /*

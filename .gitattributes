@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The Git Bash CLI shim breaks on CRLF line endings. P20-1
+bin/cvmux text eol=lf

@@ -5,7 +5,10 @@
  * 답해야 도구로 쓸 수 있다 — cmux의 no-socket help 계약과 같은 규칙이다.
  */
 
-export const VERSION = 'cvmux 0.1.0'
+import { version } from '../../package.json'
+
+/** 번들할 때 package.json에서 읽는다 — 손으로 적어 두었더니 0.1.0에 멈춰 있었다 */
+export const VERSION = `cvmux ${version}`
 
 export const HELP = `cvmux - 제어 소켓으로 cvmux를 조종한다
 

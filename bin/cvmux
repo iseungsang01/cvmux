@@ -1,0 +1,11 @@
+#!/bin/sh
+# cvmux CLI shim for Git Bash (POLICY.md P20-1).
+#
+# Claude Code runs its hooks through Git Bash on Windows. Bash ignores
+# PATHEXT, so it never finds cvmux.cmd - without this file "cvmux" would
+# resolve to cvmux.exe and start the app instead of the CLI.
+dir=$(dirname "$0")
+if [ -f "$dir/../resources/cli/cvmux.mjs" ]; then
+  ELECTRON_RUN_AS_NODE=1 exec "$dir/../cvmux.exe" "$dir/../resources/cli/cvmux.mjs" "$@"
+fi
+exec node "$dir/../out/cli/cvmux.mjs" "$@"

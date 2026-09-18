@@ -99,10 +99,16 @@ extraResources:
   - from: out/cli
     to: cli
 
-# 셸은 cvmux.exe 바로 옆에 놓인다 — 세션 PATH에 이 폴더가 들어간다. P20-1
+# CLI 셸은 cvmux.exe 옆이 아니라 bin/ 에 놓이고, 세션 PATH에는 이 폴더만
+# 들어간다. 실행 파일과 같은 폴더에 두면 PowerShell은 PATHEXT 순서대로
+# cvmux.exe를 먼저 잡아 CLI 대신 앱을 띄운다. `cvmux`(확장자 없음)는 Git Bash용
+# — Claude Code가 훅을 그것으로 돌린다. P20-1
 extraFiles:
-  - from: bin/cvmux.cmd
-    to: cvmux.cmd
+  - from: bin
+    to: bin
+    filter:
+      - cvmux
+      - cvmux.cmd
 
 win:
   target:
