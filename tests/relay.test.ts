@@ -185,6 +185,27 @@ async function main(): Promise<void> {
     check('사람이 끼면 다시 센다', relay.modeOf('A', 'B') === 'both')
   }
 
+  // ── 끝내기 (P29-9) ───────────────────────────────────────────
+  {
+    const { host, relay } = make(3)
+    relay.setMode('A', 'B', 'both')
+    relay.turnComplete('A', '테스트를 고쳤습니다. 다음 할 일: 리뷰', 'claude')
+    check('머리말이 끝내는 법을 알려 준다', pastedTo(host, 'B')[0]?.includes('[완료]'))
+    relay.turnComplete('B', '  [완료] 리뷰했습니다. 문제 없습니다', 'codex')
+    check('[완료]로 시작하면 넘기지 않는다', pastedTo(host, 'A').length === 0)
+    check('대신 사람에게 알린다', host.notes.some(([id, t]) => id === 'B' && t.includes('[완료]')))
+    check('연결은 켜 둔다', relay.modeOf('A', 'B') === 'both')
+    relay.turnComplete('A', '[DONE] nothing more', 'claude')
+    check('[DONE]도 끝내는 표시다', pastedTo(host, 'B').length === 1)
+    relay.turnComplete('A', '결론: [완료] 표시는 첫머리에만 씁니다', 'claude')
+    check('중간의 [완료]는 끝내는 표시가 아니다', pastedTo(host, 'B').length === 2)
+
+    // 끝낸 뒤에는 핑퐁 횟수도 처음부터 센다
+    relay.turnComplete('B', '[완료]', 'codex')
+    for (let i = 0; i < 3; i++) relay.turnComplete('A', `일 ${i}`, 'claude')
+    check('끝내면 핑퐁 횟수를 되돌린다', relay.modeOf('A', 'B') === 'both')
+  }
+
   // ── 사람 입력 판정 ───────────────────────────────────────────
   check('글자는 사람 입력', isHumanInput('a'))
   check('Enter도 사람 입력', isHumanInput('\r'))

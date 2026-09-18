@@ -134,6 +134,20 @@ export class Relay {
     if (!to || !body) return
 
     const key = pairKey(from, to)
+
+    /*
+     * 더 주고받을 것이 없다고 했다 (P29-9).
+     *
+     * 넘기지 않고 사람에게 돌려준다. 이 표시가 없으면 할 일이 끝난 뒤에도
+     * "확인했습니다"만 상한까지 오간다. 연결은 켜 둔다 — 사람이 새 일을
+     * 주면 그대로 이어서 주고받는다.
+     */
+    if (isDone(body)) {
+      this.streaks.delete(key)
+      this.host.notify(from, `${agent ?? '에이전트'}가 [완료]로 마쳤습니다 — 옆으로 넘기지 않았습니다`)
+      return
+    }
+
     const count = (this.streaks.get(key) ?? 0) + 1
     if (count > this.maxAutoTurns) {
       // 두 방향 모두 끈다 — 한쪽만 끄면 남은 쪽이 다시 불을 붙인다. P29-6
@@ -226,7 +240,21 @@ export class Relay {
 }
 
 /** 받는 에이전트가 누가 보낸 것인지 알게 머리를 붙인다 */
+/**
+ * 받는 에이전트가 누가 보낸 것인지 알게 머리를 붙인다.
+ *
+ * 끝내는 법도 여기 적는다(P29-9) — 설명서(docs/codex.md)를 읽지 않은
+ * 에이전트도 이 한 줄만 보면 핑퐁을 멈출 수 있다.
+ */
 function format(agent: string | null, text: string): string {
   const body = text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n\n(… 길어서 뒤를 잘랐습니다)` : text
-  return `[cvmux] 옆 pane의 ${agent ?? '에이전트'}가 보낸 답변입니다:\n\n${body}`
+  return (
+    `[cvmux] 옆 pane의 ${agent ?? '에이전트'}가 보낸 답변입니다. ` +
+    `더 주고받을 것이 없으면 답을 [완료]로 시작하세요.\n\n${body}`
+  )
+}
+
+/** 더 주고받을 것이 없다는 표시로 시작하는 답인가. 영어로 답하는 에이전트를 위해 [DONE]도 받는다. P29-9 */
+export function isDone(text: string): boolean {
+  return /^\s*\[(완료|done)\]/i.test(text)
 }
