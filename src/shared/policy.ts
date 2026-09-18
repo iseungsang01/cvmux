@@ -120,9 +120,6 @@ export const POLICY = {
   /** 세션 목록을 디스크에 저장하는 주기(ms). P16-1 */
   PERSIST_INTERVAL_MS: 30_000,
 
-  /** 세션당 저장할 스크롤백 상한. P16-5 */
-  PERSIST_SCROLLBACK_BYTES: 128 * 1024,
-
   /**
    * 알림함이 들고 있는 최대 개수. 오래된 것부터 밀려난다. P21-2
    *

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
  * (`claude --resume <id>`). cvmux가 아는 것은 "어느 세션에서 어느 에이전트가
  * 돌았는가"뿐이므로, 훅이 그 대응을 여기에 적어 둔다.
  *
- * 앱을 다시 켜면 셸이 새로 뜨는데(P16-6), 그때 이 기록이 있으면 그 셸에서
+ * 앱을 다시 켜면 셸이 새로 뜨는데(P16), 그때 이 기록이 있으면 그 셸에서
  * 에이전트의 resume 명령을 이어서 띄운다. 없으면 그냥 셸이다.
  *
  * cmux는 `~/.cmuxterm/<agent>-hook-sessions.json`에 같은 것을 적는다. cvmux는

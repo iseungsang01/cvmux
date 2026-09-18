@@ -36,13 +36,8 @@ async function main(): Promise<void> {
   // ── 복원은 아무것도 띄우지 않는다 (P28-1) ─────────────────────
   {
     const saved: PersistedSession[] = [
-      {
-        cwd: dir,
-        title: '빌드',
-        scrollback: 'PS> npm test\r\nok\r\n',
-        agent: { name: 'claude', sessionId: 'abc-123' }
-      },
-      { cwd: dir, title: null, scrollback: '' }
+      { cwd: dir, title: '빌드', agent: { name: 'claude', sessionId: 'abc-123' } },
+      { cwd: dir, title: null }
     ]
 
     const manager = new PtyManager({ defaultCwd: dir })
@@ -55,12 +50,9 @@ async function main(): Promise<void> {
       manager.list().every((m) => m.status === 'dormant' && m.shell === '')
     )
     check('켜지 않은 세션은 실행 중으로 세지 않는다', manager.busyCount() === 0)
-    check(
-      '켜지 않아도 복원한 화면은 읽힌다',
-      manager.snapshot(first)?.replay.includes('npm test') === true
-    )
+    check('복원한 세션은 이전 화면 없이 빈 채로 온다 (P16-5)', manager.snapshot(first)?.replay === '')
 
-    // 켜지 않고 껐다 켜기를 되풀이해도 구분선이 쌓이거나 에이전트 연결을 잃으면 안 된다
+    // 켜지 않고 껐다 켜기를 되풀이해도 에이전트 연결을 잃으면 안 된다
     const again = manager.serialize()
     check(
       '켜지 않은 채 다시 저장하면 저장본 그대로다',
@@ -81,6 +73,11 @@ async function main(): Promise<void> {
     check('켜면 셸이 뜬다', (woken?.shell ?? '') !== '', woken?.warning ?? '')
     check('켜면 저장본을 놓는다 — 이제 살아 있는 화면이 저장된다', manager.serialize()[0].agent === undefined)
     check('나머지는 여전히 꺼져 있다', manager.metaOf(second)?.status === 'dormant')
+    check(
+      '켠 세션을 저장해도 화면은 적지 않는다 (P16-5)',
+      JSON.stringify(Object.keys(manager.serialize()[0])) === '["cwd","title"]',
+      JSON.stringify(manager.serialize()[0])
+    )
 
     // ── 입력이 오면 켠다 (P28-4) ─────────────────────────────
     manager.write(second, '')
@@ -119,13 +116,18 @@ async function main(): Promise<void> {
       JSON.stringify({
         version: 4,
         savedAt: 0,
-        sessions: [{ cwd: dir, title: null, scrollback: '' }],
+        sessions: [{ cwd: dir, title: null, scrollback: 'PS> npm test\r\nok\r\n' }],
         windows: [{ workspaces: [{ title: null, root: leaf, focusedIndex: 0, autostart: true }] }],
         notifications: []
       })
     )
     const loaded = new SessionStore(file).load()
     check('파일에서도 고정을 읽는다', loaded?.windows[0]?.workspaces[0]?.autostart === true)
+    check(
+      '옛 파일의 스크롤백은 읽지 않는다 (P16-6)',
+      loaded !== null && !('scrollback' in loaded.sessions[0]),
+      JSON.stringify(loaded?.sessions[0])
+    )
   }
 
   rmSync(dir, { recursive: true, force: true })

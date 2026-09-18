@@ -19,7 +19,7 @@ import { ProbeScheduler, gitInfoEqual, portsEqual, shellsEqual } from './probe-s
 import { SessionState } from './session-state'
 import type { CvmuxConfig } from '@shared/config'
 import { resumeCommand } from './agent-sessions'
-import { trimScrollback, type PersistedSession } from './store'
+import type { PersistedSession } from './store'
 
 /**
  * PowerShell 세션 부트스트랩 (P3-3).
@@ -28,15 +28,14 @@ import { trimScrollback, type PersistedSession } from './store'
  * 건드리지 않고 세션 한정으로 인코딩만 바꾼다. 인용 지옥을 피하려고
  * -EncodedCommand(UTF-16LE Base64)로 넘긴다.
  */
-function psBootstrap(keepScreen: boolean, resume: string | null): string {
+function psBootstrap(resume: string | null): string {
   const parts = [
     '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)'
   ]
   if (process.env.CVMUX_NO_SHELL_INTEGRATION !== '1') parts.push(SHELL_INTEGRATION)
-  // 복원된 세션에서는 화면을 지우지 않는다 — 지우면 복원한 스크롤백이 날아간다. P16-6
-  if (!keepScreen) parts.push('Clear-Host')
+  parts.push('Clear-Host')
 
   /*
    * 에이전트 이어서 띄우기 (P22-8).
@@ -105,20 +104,6 @@ if (-not $global:__cvmuxShellIntegration) {
 }
 `.trim()
 
-/**
- * 셸과 ConPTY가 시작하면서 보내는 화면 지우기(ED)를 걷어낸다 (P16-6).
- *
- * 복원된 세션에서만 쓴다. 이걸 하지 않으면 애써 되살린 스크롤백을 새 셸의 첫
- * 출력이 통째로 지워버린다.
- *
- * 커서 이동(CUP)은 건드리지 않는다. 한때 같이 지웠더니 PSReadLine이 커서를
- * 되돌리지 못해 새 프롬프트가 복원된 프롬프트 옆에 나란히 그려졌다. 커서는
- * 맨 위로 가도 괜찮다 — 지우지만 않으면 복원분은 스크롤백에 그대로 남는다.
- */
-function stripScreenClear(chunk: string): string {
-  return chunk.replace(/\x1b\[[0-3]?J/g, '')
-}
-
 function encodePowerShellCommand(command: string): string {
   return Buffer.from(command, 'utf16le').toString('base64')
 }
@@ -143,14 +128,14 @@ function resolveShell(preferred?: string): string | null {
   return null
 }
 
-function shellArgs(shell: string, keepScreen: boolean, resume: string | null): string[] {
+function shellArgs(shell: string, resume: string | null): string[] {
   const name = basename(shell).toLowerCase()
   if (name === 'pwsh.exe' || name === 'powershell.exe') {
     return [
       '-NoLogo',
       '-NoExit',
       '-EncodedCommand',
-      encodePowerShellCommand(psBootstrap(keepScreen, resume))
+      encodePowerShellCommand(psBootstrap(resume))
     ]
   }
   return []
@@ -179,9 +164,6 @@ export interface PtyManagerOptions {
   /** 아무 것도 지정되지 않았을 때 세션이 시작할 디렉토리. 기본은 사용자 홈 */
   defaultCwd?: string
 }
-
-/** 복원된 스크롤백과 새 셸의 출력 사이에 긋는 선. P16-6 */
-const RESTORE_DIVIDER = `\r\n\x1b[90m${'─'.repeat(12)} 이전 세션 (복원됨) ${'─'.repeat(12)}\x1b[0m\r\n`
 
 /**
  * 프로세스 트리를 통째로 종료한다 (P1-6 / P10-2).
@@ -226,17 +208,12 @@ class Session {
   /**
    * 복원만 해 두고 아직 셸을 띄우지 않았다면 그 저장본 (P28-1).
    *
-   * 켜기 전에 다시 저장하면 이것을 그대로 옮겨 적는다(P28-6) — 구분선이 붙은
-   * 재생 버퍼를 적으면 켜지 않고 껐다 켤 때마다 구분선이 한 줄씩 쌓이고,
-   * 훅이 새 id로 다시 적기 전이라 에이전트 연결도 잃는다.
+   * 켜기 전에 다시 저장하면 이것을 그대로 옮겨 적는다(P28-6) — 살아 있는
+   * 세션처럼 적으면 훅이 새 id로 다시 적기 전이라 에이전트 연결을 잃는다.
    */
   saved: PersistedSession | null = null
 
   private startedAt = 0
-  /** 저장된 스크롤백에서 되살아난 세션인가. P16-6 */
-  private restored = false
-  /** 이 시각까지는 화면 지우기 시퀀스를 걷어낸다 (복원 화면 보호). P16-6 */
-  private stripClearUntil = 0
   /** 렌더러 재연결 시 화면을 되살릴 최근 출력. P9-1 */
   private replay = ''
   /** IPC 배칭 버퍼. P3-4 */
@@ -247,7 +224,6 @@ class Session {
   constructor(
     options: CreateSessionOptions,
     defaultCwd: string,
-    restoredScrollback: string | null,
     /**
      * 모든 세션에 얹는 환경변수 (P20-3).
      *
@@ -280,13 +256,6 @@ class Session {
     this.userTitle = options.title ?? null
     this.cols = clampCols(options.cols)
     this.rows = clampRows(options.rows)
-
-    if (restoredScrollback) {
-      // 복원된 것은 텍스트일 뿐 프로세스가 아니다. 새 셸의 출력과 섞이지 않게
-      // 구분선을 긋는다 — 이전 화면인 척 하면 안 된다. P16-6
-      this.replay = restoredScrollback + RESTORE_DIVIDER
-      this.restored = true
-    }
 
     this.state = new SessionState({
       onChange: () => this.emit.meta(this.id),
@@ -338,7 +307,7 @@ class Session {
     this.shell = shell
 
     try {
-      const proc = pty.spawn(shell, shellArgs(shell, this.restored, this.resume), {
+      const proc = pty.spawn(shell, shellArgs(shell, this.resume), {
         name: 'xterm-256color',
         cols: this.cols,
         rows: this.rows,
@@ -351,8 +320,6 @@ class Session {
       this.startedAt = Date.now()
       // 이어서 띄우기는 복원할 때 한 번뿐이다. P22-8
       this.resume = null
-      // 셸이 뜨는 동안 오는 클리어만 막는다. 그 뒤의 Clear-Host는 사용자 의도다. P16-6
-      if (this.restored) this.stripClearUntil = this.startedAt + 1500
 
       proc.onData((chunk) => this.onData(chunk))
       proc.onExit(({ exitCode, signal }) => this.onExit(exitCode, signal ?? null))
@@ -375,17 +342,8 @@ class Session {
     this.emit.meta(this.id)
   }
 
-  private onData(rawChunk: string): void {
+  private onData(chunk: string): void {
     if (this.disposed) return
-
-    let chunk = rawChunk
-    if (this.stripClearUntil > 0) {
-      if (Date.now() < this.stripClearUntil) {
-        chunk = stripScreenClear(chunk)
-      } else {
-        this.stripClearUntil = 0
-      }
-    }
 
     this.state.ingest(chunk)
     this.appendReplay(chunk)
@@ -486,11 +444,6 @@ class Session {
 
   snapshot(): SessionSnapshot {
     return { meta: this.toMeta(), replay: this.replay }
-  }
-
-  /** 디스크에 남길 스크롤백. P16-5 */
-  get replayText(): string {
-    return this.replay
   }
 
   toMeta(): SessionMeta {
@@ -718,7 +671,6 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
     const session = new Session(
       options,
       this.defaultCwd,
-      restored?.scrollback || null,
       this.sessionEnv,
       resume,
       {
@@ -780,14 +732,13 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
           : {
               cwd: session.cwd,
               // 셸이 설정한 제목은 새 셸이 다시 알려준다. 사용자가 지은 이름만 지킨다
-              title: session.userTitle,
-              scrollback: trimScrollback(session.replayText)
+              title: session.userTitle
             }
       )
   }
 
   /**
-   * 저장된 세션을 되살린다. 프로세스가 아니라 자리(작업 디렉토리)와 화면을 복원한다.
+   * 저장된 세션을 되살린다. 프로세스도 화면도 아니라 자리(작업 디렉토리)만 복원한다(P16-5).
    *
    * 셸은 띄우지 않는다 — 전부 `dormant`로 돌아오고, `wake()`가 켠다(P28-1).
    *
@@ -864,7 +815,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   restart(id: string): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
-    // 켠 적이 없으면 재시작이 곧 켜기다 — 복원한 화면을 지우지 않는다. P28-2
+    // 켠 적이 없으면 재시작이 곧 켜기다 — 설정한 셸로 뜬다. P28-4
     if (session.dormant) return this.wake(id)
     const ok = session.restart()
     if (ok) this.probes.wake()

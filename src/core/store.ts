@@ -8,16 +8,15 @@ import type { Notification, PaneNode, Workspace } from '@shared/types'
 /**
  * 세션 목록을 디스크에 남긴다 (POLICY.md P16).
  *
- * 복원되는 것은 "어디서 무엇을 하고 있었는가"이지 프로세스가 아니다. 이전 셸은
- * 이미 죽었고 새 셸이 그 자리에 선다 — 복원된 스크롤백 뒤에 구분선을 넣어
- * 그 사실을 감추지 않는다(P16-6).
+ * 복원되는 것은 "어디서 무엇을 하고 있었는가"이지 프로세스도 화면도 아니다.
+ * 이전 셸은 이미 죽었고 새 셸이 빈 화면으로 그 자리에 선다 — 스크롤백은
+ * 저장하지 않는다(P16-5).
  */
 
 export interface PersistedSession {
   cwd: string
   /** 사용자가 직접 지정한 제목만 저장한다. 셸이 설정한 제목은 다시 오면 그만 */
   title: string | null
-  scrollback: string
   /**
    * 이 세션에서 돌던 에이전트 대화 (P22-8).
    *
@@ -87,14 +86,6 @@ export interface PersistedState {
    * 사라져도 읽을 값이 남는다 — 세션 제목을 함께 저장하는 이유다.
    */
   notifications: Notification[]
-}
-
-/** 스크롤백을 상한까지 줄인다. 이스케이프 시퀀스 중간에서 자르면 화면이 깨지므로 개행에서 자른다. P16-5 */
-export function trimScrollback(text: string): string {
-  if (text.length <= POLICY.PERSIST_SCROLLBACK_BYTES) return text
-  const cut = text.length - POLICY.PERSIST_SCROLLBACK_BYTES
-  const newline = text.indexOf('\n', cut)
-  return text.slice(newline === -1 ? cut : newline + 1)
 }
 
 export class SessionStore {
@@ -170,7 +161,6 @@ export class SessionStore {
       sessions.push({
         cwd: s.cwd,
         title: typeof s.title === 'string' ? s.title : null,
-        scrollback: typeof s.scrollback === 'string' ? s.scrollback : '',
         agent: parseAgentLink(s.agent)
       })
     }
