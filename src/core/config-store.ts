@@ -142,7 +142,11 @@ const TEMPLATE = `{
     // "shell": null,              // 비우면 pwsh → powershell → cmd 순으로 찾는다
 
     // 앱을 다시 켤 때 에이전트 세션을 이어서 띄울지. \`cvmux hooks setup\` 참고
-    // "autoResumeAgentSessions": true
+    // "autoResumeAgentSessions": true,
+
+    // 보이는 터미널을 WebGL로 그릴지. 켜면 박스 문자가 이어지고 출력이 쏟아질 때
+    // 가볍지만, GPU 프로세스가 수백 MB를 더 쥔다
+    // "gpuRendering": false
   },
 
   "sidebar": {

@@ -514,7 +514,7 @@ Select-String -Path src\*\*.ts,src\*\*\*.tsx -Pattern 'P\d+-\d+'
 - OSC 0/2 제목, OSC 7 작업 디렉토리 반영
 - 전체화면 TUI(vim/less) 감지 시 휴리스틱 자동 비활성화
 - 한글 UTF-8 출력 (세션 한정 인코딩 부트스트랩, 프로필은 건드리지 않음)
-- WebGL 렌더링 + 컨텍스트 손실 시 자동 폴백, DPI 변경 대응
+- 기본은 가벼운 DOM 렌더링, `terminal.gpuRendering`으로 WebGL(컨텍스트 손실 시 자동 폴백), DPI 변경 대응
 - 대용량 붙여넣기 확인, bracketed paste
 
 **아직 안 되는 것** — PR 상태 표시(네트워크 호출과 인증이 필요하다), SSH 워크스페이스.

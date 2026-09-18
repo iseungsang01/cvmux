@@ -126,6 +126,9 @@ export class TerminalHost {
       term.options.cursorBlink = config.terminal.cursorBlink
       term.options.scrollback = config.terminal.scrollback
       term.options.theme = themeOf(config)
+      // 렌더러도 그 자리에서 바꾼다. 켜면 보이는 것만 잡는다. P8-8 / P5-10
+      if (!config.terminal.gpuRendering) this.releaseWebgl(entry)
+      else if (entry.visible) this.enableWebgl(entry)
       this.scheduleFit(entry)
     }
   }
@@ -425,8 +428,16 @@ export class TerminalHost {
     return entry
   }
 
-  /** WebGL 렌더러. 실패나 컨텍스트 손실은 조용히 DOM 렌더러로 폴백한다. P5-2 / P5-3 */
+  /**
+   * WebGL 렌더러. 실패나 컨텍스트 손실은 조용히 DOM 렌더러로 폴백한다. P5-2 / P5-3
+   *
+   * 설정이 켰을 때만 쓴다 (P8-8). 보이는 터미널 하나가 쥔 WebGL 때문에 GPU
+   * 프로세스가 DOM 렌더러보다 250MB 남짓을 더 들고 있었다 — 워크스페이스를 오갈
+   * 때마다 새 컨텍스트를 잡고, 놓아준 뒤에도 GPU 프로세스가 그 메모리를 돌려주지
+   * 않는다.
+   */
   private enableWebgl(entry: Entry): void {
+    if (!this.config.terminal.gpuRendering) return
     // 아직 열리지 않았거나, 이미 쥐고 있거나, 너무 여러 번 잃은 터미널은 건너뛴다. P5-10
     if (!entry.opened || entry.webgl || entry.contextLosses >= MAX_CONTEXT_LOSSES) return
 

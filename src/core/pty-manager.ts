@@ -20,6 +20,10 @@ import { SessionState } from './session-state'
 import type { CvmuxConfig } from '@shared/config'
 import { resumeCommand } from './agent-sessions'
 import type { PersistedSession } from './store'
+import { installSharedConout } from './shared-conout'
+
+// 첫 세션을 띄우기 전에 끼워야 한다 — 이미 뜬 세션은 제 Worker를 계속 쓴다. P8-7
+installSharedConout()
 
 /**
  * PowerShell 세션 부트스트랩 (P3-3).

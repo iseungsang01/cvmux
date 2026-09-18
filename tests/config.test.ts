@@ -38,6 +38,10 @@ function main(): void {
     check('빈 설정에 문제 없음', problems.length === 0)
     check('기본 폰트 크기', config.terminal.fontSize === DEFAULT_CONFIG.terminal.fontSize)
     check('null도 받는다', parseConfig(null).problems.length === 0)
+    // WebGL은 GPU 프로세스에 수백 MB를 더 얹으므로 켜야만 쓴다. P8-8
+    check('WebGL은 기본으로 끈다', config.terminal.gpuRendering === false)
+    const gpu = parseConfig({ terminal: { gpuRendering: true } })
+    check('WebGL을 켤 수 있다', gpu.config.terminal.gpuRendering === true && gpu.problems.length === 0)
   }
 
   // ── 값이 얹힌다
