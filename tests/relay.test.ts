@@ -28,14 +28,19 @@ function check(name: string, ok: boolean, detail = ''): void {
 }
 
 /** 흉내 낸 세션들. 쓰인 것과 알림을 모아 둔다 */
-function fakeHost(): RelayHost & {
+function fakeHost(now: () => number): RelayHost & {
   targets: Map<string, string | null>
   status: Map<string, SessionStatus>
   command: Map<string, boolean>
   written: Array<[string, string]>
   notes: Array<[string, string]>
+  output: Map<string, number>
+  echo: boolean
 } {
   const host = {
+    /** 마지막으로 그린 시각. 입력을 받으면 다시 그린다(echo) */
+    output: new Map<string, number>(),
+    echo: true,
     targets: new Map<string, string | null>(),
     status: new Map<string, SessionStatus>([
       ['A', 'waiting'],
@@ -51,8 +56,12 @@ function fakeHost(): RelayHost & {
     setTarget: (id: string, target: string | null) => void host.targets.set(id, target),
     statusOf: (id: string) => host.status.get(id) ?? null,
     inCommand: (id: string) => host.command.get(id) ?? false,
-    write: (id: string, data: string) => void host.written.push([id, data]),
-    notify: (id: string, text: string) => void host.notes.push([id, text])
+    write: (id: string, data: string) => {
+      host.written.push([id, data])
+      if (host.echo) host.output.set(id, now())
+    },
+    notify: (id: string, text: string) => void host.notes.push([id, text]),
+    lastOutputAt: (id: string) => host.output.get(id) ?? 0
   }
   return host
 }
@@ -61,12 +70,17 @@ async function main(): Promise<void> {
   let clock = 0
   const later: Array<() => void> = []
   const make = (max = 10) => {
-    const host = fakeHost()
+    const host = fakeHost(() => clock)
     const relay = new Relay(host, max, (fn) => later.push(fn), () => clock)
     return { host, relay }
   }
-  const runLater = (): void => {
-    while (later.length) later.shift()!()
+  /** 시계를 100ms씩 흘리며 그사이 잡힌 일을 돌린다. during은 매 눈금마다 부른다 */
+  const step = (ms: number, during?: () => void): void => {
+    for (let t = 0; t < ms; t += 100) {
+      clock += 100
+      during?.()
+      for (const fn of later.splice(0)) fn()
+    }
   }
   const pastedTo = (host: ReturnType<typeof fakeHost>, id: string): string[] =>
     host.written.filter(([to, data]) => to === id && data.startsWith('\x1b[200~')).map(([, d]) => d)
@@ -98,13 +112,39 @@ async function main(): Promise<void> {
     check('bracketed paste로 한 덩어리를 넣는다', pasted.length === 1 && pasted[0].endsWith('\x1b[201~'))
     check('누가 보냈는지 머리를 붙인다', pasted[0]?.includes('claude') && pasted[0].includes('테스트 12개 통과\n다음은?'))
     check('Enter는 나중에 따로 보낸다', !host.written.some(([, d]) => d === '\r'))
-    runLater()
+    step(1000)
     check('그다음 Enter를 보낸다', host.written.at(-1)?.[0] === 'B' && host.written.at(-1)?.[1] === '\r')
 
     relay.turnComplete('B', '답장', 'codex')
     check('반대 방향은 꺼져 있으면 넘기지 않는다', pastedTo(host, 'A').length === 0)
     relay.turnComplete('A', '   ', 'claude')
     check('빈 답은 넘기지 않는다', pastedTo(host, 'B').length === 1)
+  }
+
+  // ── Enter는 받는 쪽이 붙여넣기를 다 받은 뒤에 (P29-3) ─────────
+  {
+    // Codex는 마지막 글자 뒤 120ms 안의 Enter를 줄바꿈으로 넣는다 — 다 받을 때까지 기다린다
+    const { host, relay } = make()
+    relay.setMode('A', 'B', 'forward')
+    relay.turnComplete('A', '긴 답', 'claude')
+    const enters = (): number => host.written.filter(([id, d]) => id === 'B' && d === '\r').length
+    step(1000, () => host.output.set('B', clock))
+    check('받는 쪽이 아직 그리는 중이면 Enter를 미룬다', enters() === 0)
+    step(200)
+    check('조용해진 지 300ms가 안 되면 아직 보내지 않는다', enters() === 0)
+    step(200)
+    check('조용해지면 Enter를 보낸다', enters() === 1)
+  }
+  {
+    const { host, relay } = make()
+    host.echo = false
+    relay.setMode('A', 'B', 'forward')
+    relay.turnComplete('A', '답', 'claude')
+    const enters = (): number => host.written.filter(([id, d]) => id === 'B' && d === '\r').length
+    step(2000)
+    check('붙여 넣은 뒤 한 번도 다시 그리지 않으면 기다린다', enters() === 0)
+    step(1200)
+    check('그래도 3초가 지나면 보낸다', enters() === 1)
   }
 
   // ── 셸에 붙여 넣지 않는다 (P29-4) ─────────────────────────────

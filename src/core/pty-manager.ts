@@ -220,6 +220,9 @@ class Session {
    */
   saved: PersistedSession | null = null
 
+  /** 마지막으로 출력을 받은 시각. 옆 pane에 넣은 답의 Enter를 언제 보낼지 가른다. P29-3 */
+  lastOutputAt = 0
+
   private startedAt = 0
   /** 렌더러 재연결 시 화면을 되살릴 최근 출력. P9-1 */
   private replay = ''
@@ -352,6 +355,7 @@ class Session {
   private onData(chunk: string): void {
     if (this.disposed) return
 
+    this.lastOutputAt = Date.now()
     this.state.ingest(chunk)
     this.appendReplay(chunk)
 
@@ -620,6 +624,7 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
       return session.dormant ? 'dormant' : session.state.status
     },
     inCommand: (id) => this.sessions.get(id)?.state.inCommand ?? false,
+    lastOutputAt: (id) => this.sessions.get(id)?.lastOutputAt ?? 0,
     write: (id, data) => this.sessions.get(id)?.write(data),
     notify: (id, text) => {
       this.notify(id, text)

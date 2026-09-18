@@ -20,13 +20,19 @@ export interface RelayHost {
   inCommand(id: string): boolean
   write(id: string, data: string): void
   notify(id: string, text: string): void
+  /** 이 세션이 마지막으로 무언가를 그린 시각. Enter를 보낼 때를 고르는 데 쓴다. P29-3 */
+  lastOutputAt(id: string): number
 }
 
 /** 받는 쪽이 입력창에서 기다리는 상태 */
 const READY: ReadonlySet<SessionStatus> = new Set(['idle', 'waiting'])
 
-/** 붙여 넣은 뒤 Enter를 보내기까지. 붙여넣기를 다 받기 전에 Enter가 오면 줄바꿈으로 먹힌다 */
-const SUBMIT_DELAY_MS = 150
+/** 붙여 넣은 뒤 받는 쪽 화면이 이만큼 조용해야 Enter를 보낸다. P29-3 */
+const SUBMIT_QUIET_MS = 300
+/** 받는 쪽 화면을 다시 보는 간격 */
+const SUBMIT_POLL_MS = 100
+/** 끝내 조용해지지 않아도 이만큼 지나면 보낸다 */
+const SUBMIT_MAX_WAIT_MS = 3000
 
 /**
  * 넣어 준 턴이 끝났다는 소식이 끝내 오지 않을 때 (P29-5).
@@ -232,10 +238,33 @@ export class Relay {
    * 여러 줄을 그냥 흘리면 에이전트 입력창이 첫 줄바꿈에서 제출해 버린다.
    */
   private paste(to: string, text: string): void {
-    this.handling.set(to, this.now())
+    const at = this.now()
+    this.handling.set(to, at)
     this.finished.delete(to)
     this.host.write(to, `\x1b[200~${text}\x1b[201~`)
-    this.schedule(() => this.host.write(to, '\r'), SUBMIT_DELAY_MS)
+    this.submitWhenSettled(to, at)
+  }
+
+  /**
+   * 붙여넣기를 다 받은 뒤에 Enter를 보낸다 (P29-3).
+   *
+   * Codex는 Windows에서 붙여넣기를 빠른 키 입력 묶음으로 받고, 마지막 글자 뒤
+   * 120ms 안에 온 Enter는 제출이 아니라 줄바꿈으로 넣는다(paste_burst.rs의
+   * PASTE_ENTER_SUPPRESS_WINDOW). 긴 답은 ConPTY를 거쳐 다 들어가는 데 그보다
+   * 오래 걸려서, 150ms 뒤에 보내던 Enter가 먹히고 입력창에 답만 남았다.
+   *
+   * 시간을 정해 두지 않고 받는 쪽 화면을 본다. 입력창이 붙여넣기를 받으면 다시
+   * 그리므로, 붙여 넣은 뒤 한 번은 그렸고 그 뒤로 조용해졌으면 다 받은 것이다.
+   */
+  private submitWhenSettled(to: string, since: number): void {
+    const check = (): void => {
+      const now = this.now()
+      const last = this.host.lastOutputAt(to)
+      const settled = last >= since && now - last >= SUBMIT_QUIET_MS
+      if (settled || now - since >= SUBMIT_MAX_WAIT_MS) this.host.write(to, '\r')
+      else this.schedule(check, SUBMIT_POLL_MS)
+    }
+    this.schedule(check, SUBMIT_POLL_MS)
   }
 }
 
