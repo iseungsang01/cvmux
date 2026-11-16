@@ -548,6 +548,18 @@ function buildEnv(sessionId: string, extra: Record<string, string>): Record<stri
    * 개발하다 겪었다. cvmux 세션은 앱을 앱으로 띄우는 보통 터미널이다.
    */
   delete env.ELECTRON_RUN_AS_NODE
+
+  /*
+   * Claude Code를 전체 화면 렌더러로 띄운다 (P3-10).
+   *
+   * 기본 렌더러는 입력창을 출력 맨 아래에 이어 그린다. 입력창이 화면 아래쪽에
+   * 있을 때 `/` 메뉴처럼 수십 줄짜리 목록이 붙으면 화면 끝을 넘어 전체가 위로
+   * 스크롤되고, 스크롤백으로 넘어간 줄은 메뉴를 닫아도 돌아오지 않는다. 전체 화면
+   * 렌더러는 화면 크기 안에서만 그리므로 밀리지 않는다. 사용자가 이미 값을
+   * 정했으면(`0` 포함) 그대로 둔다.
+   */
+  env.CLAUDE_CODE_NO_FLICKER ??= '1'
+
   // 에이전트 훅이 자신이 cvmux 안에서 도는지 알 수 있게 한다
   env.CVMUX = '1'
   env.CVMUX_SESSION_ID = sessionId
