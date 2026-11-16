@@ -72,6 +72,15 @@ files:
   # N-API 헤더는 컴파일할 때만 쓴다. npmRebuild가 꺼져 있으므로 여기서는
   # 한 번도 열리지 않는다
   - '!node_modules/node-addon-api/**'
+  # koffi(P8-9)는 C++ 원본과 빌드용 헤더를 함께 배포한다. 런타임이 여는 것은
+  # src/koffi의 .cjs 셋과 @koromix/koffi-win32-x64의 koffi.node뿐이다
+  - '!node_modules/koffi/doc/**'
+  - '!node_modules/koffi/lib/**'
+  - '!node_modules/koffi/vendor/**'
+  - '!node_modules/koffi/cnoke.cjs'
+  - '!node_modules/koffi/src/koffi/src/abi/**'
+  - '!node_modules/koffi/src/koffi/**/*.{cc,hh,inc,txt,js}'
+  - '!node_modules/@koromix/*/win32_x64/koffi.lib'
 
 # Electron 런타임에서 우리가 쓰지 않는 것을 덜어낸다 (P26-7).
 # files/asarUnpack은 앱 쪽만 손댈 수 있어, Chromium이 들고 오는 파일은
@@ -92,6 +101,7 @@ compression: maximum
 # 실제 파일 경로로 존재해야 ConPTY가 뜬다.
 asarUnpack:
   - '**/node_modules/node-pty/**'
+  - '**/node_modules/@koromix/**'
 
 # CLI는 asar 밖에 있어야 한다. ELECTRON_RUN_AS_NODE로 돌 때는 Electron이 asar를
 # 읽지 못하므로, 안에 넣으면 `cvmux ping` 한 줄도 못 돈다. P20-1

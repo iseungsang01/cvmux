@@ -19,6 +19,7 @@ import { UpdateManager } from './updater'
 import { registerIpc, sessionIdsOf } from './ipc'
 import { Notifier } from './notifier'
 import { createTray, type TrayController } from './tray'
+import { startMemoryTrim } from './memory-trim'
 
 /**
  * cvmux 앱 — 세션을 담고 있는 Electron 메인 프로세스.
@@ -26,6 +27,24 @@ import { createTray, type TrayController } from './tray'
  * PTY는 이 프로세스 안에 산다. 창을 닫으면(X) 트레이로 물러날 뿐이지만, 앱이
  * 완전히 종료되면 세션도 함께 끝난다 — 앱의 수명이 곧 세션의 수명이다.
  */
+
+/*
+ * GPU 가속을 쓰지 않는다 (P8-8).
+ *
+ * 터미널은 DOM으로 그리고 화면은 텍스트뿐이라, GPU 프로세스가 쥔 D3D 자원은
+ * 50~70MB를 차지하면서 얻는 것이 없었다. 끄면 GPU 프로세스는 22MB짜리 소프트웨어
+ * 합성기로 남고, 같은 2만 줄 출력의 CPU 시간도 늘지 않았다. 내장 브라우저의
+ * 페이지도 소프트웨어로 그린다 — WebGL을 쓰는 페이지는 거기서 돌지 않는다.
+ */
+app.disableHardwareAcceleration()
+
+/*
+ * 네트워크 서비스를 main 안에서 돌린다 (P8-10).
+ *
+ * 따로 띄우면 그 자체로 7MB 남짓인 프로세스가 하나 더 생긴다. cvmux가 네트워크를
+ * 쓰는 것은 업데이트 확인과 내장 브라우저뿐이라 격리해서 얻는 것이 없다.
+ */
+app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2')
 
 /**
  * 개발 중에는 앱을 띄운 디렉토리에서 첫 세션을 시작한다 — 터미널 앱의 관례이고,
@@ -560,6 +579,7 @@ if (!app.requestSingleInstanceLock()) {
     )
     control.start()
     updater.start()
+    startMemoryTrim()
 
     /*
      * 세션 안에서 `cvmux`가 보이게 한다 (P20-1).

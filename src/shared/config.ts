@@ -20,13 +20,6 @@ export interface TerminalConfig {
   shell: string | null
   /** 앱을 다시 켤 때 에이전트 세션을 이어서 띄울 것인가. P22-8 */
   autoResumeAgentSessions: boolean
-  /**
-   * 보이는 터미널을 WebGL로 그릴 것인가 (P8-8).
-   *
-   * 기본은 끈다 — 켜면 GPU 프로세스가 수백 MB를 더 쥔다. 대신 박스 문자가
-   * 칸을 꽉 채워 이어지고, 출력이 쏟아질 때 렌더러 CPU가 절반쯤 든다.
-   */
-  gpuRendering: boolean
 }
 
 export interface SidebarConfig {
@@ -159,8 +152,7 @@ export const DEFAULT_CONFIG: CvmuxConfig = {
     cursorBlink: true,
     scrollback: 10_000,
     shell: null,
-    autoResumeAgentSessions: true,
-    gpuRendering: false
+    autoResumeAgentSessions: true
   },
   sidebar: { width: 264, fontSize: 13 },
   update: { enabled: true },
@@ -248,9 +240,6 @@ export function parseConfig(raw: unknown): ParsedConfig {
         config.terminal.autoResumeAgentSessions = v
       }
     )
-    bool(terminal, 'gpuRendering', 'terminal.gpuRendering', problems, (v) => {
-      config.terminal.gpuRendering = v
-    })
     str(terminal, 'shell', 'terminal.shell', problems, (v) => {
       config.terminal.shell = v
     })

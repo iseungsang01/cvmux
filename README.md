@@ -189,8 +189,7 @@ cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
     "fontFamily": "Cascadia Mono, Consolas, monospace",
     "fontSize": 14,
     "scrollback": 10000,
-    "shell": null,             // 비우면 pwsh → powershell → cmd 순으로 찾는다
-    "gpuRendering": false      // true면 WebGL로 그린다 — 메모리를 수백 MB 더 쓴다
+    "shell": null              // 비우면 pwsh → powershell → cmd 순으로 찾는다
   },
   "sidebar": { "width": 300 },
   "theme": { "background": "#0d1016", "blue": "#7aa2f7" },
@@ -206,9 +205,9 @@ cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
 ## 메모리
 
 셸 하나는 conhost까지 80MB 남짓이라, 복원한 세션은 볼 때 켠다(위 "복원").
-앱 자체는 세션 6개를 켜 둔 기준 200MB 안팎이다. 터미널은 기본으로 DOM 렌더러로
-그린다 — WebGL(`gpuRendering`)은 박스 문자가 끊김 없이 이어지는 대신 GPU 쪽
-메모리를 250MB 남짓 더 쓴다.
+앱 자체는 세션 6개를 켜 둔 기준 150MB 안팎이고, 창에서 포커스가 떠나면 10초 뒤
+working set을 비워 10MB대로 내려간다(다시 보면 필요한 만큼만 돌아온다). GPU 가속은
+쓰지 않는다 — 터미널은 DOM으로 그리고, 내장 브라우저도 소프트웨어로 그린다.
 
 ## 업데이트
 
