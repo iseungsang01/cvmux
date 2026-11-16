@@ -36,6 +36,9 @@ const FIRST_CHECK_MS = 20_000
 /** 그 뒤로는 이 주기로 본다. 하루에 몇 번이면 충분하다 */
 const INTERVAL_MS = 6 * 60 * 60 * 1000
 
+/** 창으로 돌아왔을 때 마지막 확인이 이보다 오래됐으면 다시 본다 */
+const FOCUS_STALE_MS = 30 * 60 * 1000
+
 export class UpdateManager {
   private state: UpdateState = {
     status: 'idle',
@@ -47,6 +50,10 @@ export class UpdateManager {
   }
   private timer: NodeJS.Timeout | null = null
   private firstTimer: NodeJS.Timeout | null = null
+  private lastCheck = 0
+  private readonly onFocus = (): void => {
+    if (Date.now() - this.lastCheck >= FOCUS_STALE_MS) void this.check()
+  }
 
   constructor(private readonly host: UpdaterHost) {
     /*
@@ -120,6 +127,14 @@ export class UpdateManager {
     }, FIRST_CHECK_MS)
 
     this.timer = setInterval(() => void this.check(), INTERVAL_MS)
+
+    /*
+     * 창으로 돌아오면 다시 본다 (P26-1).
+     *
+     * 6시간 주기만 믿으면 방금 낸 릴리스가 반나절 동안 보이지 않는다. 사용자가
+     * 창을 다시 볼 때가 새 버전을 알려줄 때다. 30분 안에 본 적이 있으면 건너뛴다.
+     */
+    app.on('browser-window-focus', this.onFocus)
   }
 
   async check(manual = false): Promise<UpdateState> {
@@ -133,6 +148,7 @@ export class UpdateManager {
       return this.state
     }
 
+    this.lastCheck = Date.now()
     try {
       await autoUpdater.checkForUpdates()
     } catch (error) {
@@ -154,6 +170,7 @@ export class UpdateManager {
   }
 
   dispose(): void {
+    app.off('browser-window-focus', this.onFocus)
     if (this.timer) clearInterval(this.timer)
     if (this.firstTimer) clearTimeout(this.firstTimer)
     this.timer = null
