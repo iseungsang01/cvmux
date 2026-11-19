@@ -39,6 +39,15 @@ export interface GitInfo {
   detached: boolean
   /** 커밋되지 않은 변경이 있는가 */
   dirty: boolean
+  /**
+   * 바뀐 파일 수 — 추적하지 않는 파일 포함 (P13-14).
+   *
+   * 이미 받는 `git status` 출력의 줄 수라 조사가 늘지 않는다. "고친 것이 있다"보다
+   * "얼마나 고쳤나"가 에이전트를 여럿 돌릴 때 볼 차례를 정한다.
+   */
+  changes: number
+  /** `git worktree add`로 만든 작업 트리인가 — 본 저장소와 구분해 보여준다. P31 */
+  worktree: boolean
   ahead: number
   behind: number
   /** rebase / merge / cherry-pick / revert / bisect 진행 중. P13-4 */
@@ -234,6 +243,20 @@ export interface Workspace {
    * 나머지는 복원만 해 두고 볼 때 켠다 — 쓰지 않는 셸이 하나에 수십 MB씩 먹는다.
    */
   autostart?: boolean
+  /**
+   * 포커스된 pane 하나만 워크스페이스 전체에 띄운다 (P30-4).
+   *
+   * pane id가 아니라 켜짐/꺼짐만 든다 — 확대는 언제나 **포커스된** pane의 것이라,
+   * 알림을 따라 다른 pane으로 옮겨 가면 그 pane이 확대된다. 저장하지 않는다.
+   */
+  zoomed?: boolean
+  /**
+   * 친 키를 이 워크스페이스의 보이는 터미널 전부에 보낸다 (P30-7).
+   *
+   * tmux의 `synchronize-panes`. 저장하지 않는다 — 앱을 다시 켰을 때 모르는 사이
+   * 켜져 있으면 한 pane에 친 명령이 모든 pane에서 돈다.
+   */
+  syncInput?: boolean
 }
 
 export interface CreateSessionOptions {
@@ -261,6 +284,15 @@ export interface SessionExitInfo {
   id: string
   exitCode: number | null
   exitSignal: number | null
+}
+
+/** worktree 만들기·지우기의 결과. P31 */
+export interface WorktreeResult {
+  ok: boolean
+  path?: string
+  branch?: string
+  /** 사람이 읽을 사유. 사람이 취소했으면 비어 있다 */
+  message?: string
 }
 
 /** 붙여넣기 시점의 클립보드 상태. P7-4 / P7-5 */
@@ -314,6 +346,9 @@ export const IPC = {
   UPDATE_STATE: 'update:state',
   UPDATE_CHECK: 'update:check',
   UPDATE_INSTALL: 'update:install',
+  /** 작업마다 worktree 하나. P31 */
+  WORKTREE_CREATE: 'worktree:create',
+  WORKTREE_REMOVE: 'worktree:remove',
   /** 워크스페이스 메타데이터. P25 */
   WORKSPACE_META: 'meta:get',
   TODO_SET_STATE: 'meta:todo-state',
@@ -439,6 +474,13 @@ export interface CvmuxApi {
   updateState(): Promise<UpdateState>
   updateCheck(): Promise<UpdateState>
   updateInstall(): Promise<boolean>
+
+  /** cwd의 저장소에 작업 트리를 만든다. P31-1 */
+  worktreeCreate(cwd: string, branch: string, base?: string): Promise<WorktreeResult>
+  /**
+   * cwd가 속한 작업 트리를 지운다 — 세션들을 먼저 닫는다. confirm이 false면 묻지 않는다(소켓). P31-3
+   */
+  worktreeRemove(cwd: string, sessionIds: string[], confirm: boolean): Promise<WorktreeResult>
 
   /** 워크스페이스 메타데이터. P25 */
   workspaceMeta(): Promise<Record<string, WorkspaceMeta>>

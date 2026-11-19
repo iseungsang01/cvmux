@@ -164,6 +164,13 @@ export function actionFor(bindings: Map<string, Chord>, event: KeyEventLike): st
   return null
 }
 
+const ARROWS: Record<string, string> = {
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  ArrowUp: '↑',
+  ArrowDown: '↓'
+}
+
 /** 화면에 보여줄 표기. 설정에 적힌 것을 그대로 보여주기보다 정규화한다 */
 export function formatChord(chord: Chord): string {
   const parts: string[] = []
@@ -176,6 +183,8 @@ export function formatChord(chord: Chord): string {
   else if (code.startsWith('Digit')) parts.push(code.slice(5))
   else if (code === 'Equal') parts.push('=')
   else if (code === 'Minus') parts.push('-')
+  else if (code === 'Backquote') parts.push('`')
+  else if (code.startsWith('Arrow')) parts.push(ARROWS[code] ?? code)
   else parts.push(code)
 
   return parts.join('+')

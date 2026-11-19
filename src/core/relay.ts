@@ -1,3 +1,4 @@
+import { isHumanInput } from '@shared/input'
 import type { RelayMode, SessionStatus } from '@shared/types'
 
 /**
@@ -49,27 +50,6 @@ const MAX_CHARS = 50_000
 export function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`
 }
-
-/**
- * 사람이 친 키인가 (P29-6).
- *
- * 렌더러가 보내는 것에는 xterm이 스스로 답하는 제어 시퀀스(포커스 보고, 장치
- * 속성 응답)도 섞여 있다. 에이전트 TUI는 포커스 보고를 켜 두므로, 이것까지
- * 사람 입력으로 세면 pane을 클릭만 해도 핑퐁 횟수가 되돌려진다.
- */
-export function isHumanInput(data: string): boolean {
-  const stripped = TERMINAL_REPLIES.reduce((rest, pattern) => rest.replace(pattern, ''), data)
-  return stripped.length > 0
-}
-
-/** 터미널이 스스로 보내는 응답. 방향키 같은 키 입력은 여기 들지 않는다 */
-const TERMINAL_REPLIES: RegExp[] = [
-  /\x1b\[[IO]/g, // 포커스 보고
-  /\x1b\[[?>]?[\d;]*c/g, // 장치 속성 응답
-  /\x1b\[\d+;\d+R/g, // 커서 위치 응답
-  /\x1b\[\?[\d;]*\$y/g, // 모드 질의 응답
-  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g // OSC 응답 (색 질의 등)
-]
 
 export class Relay {
   /** 짝마다 사람 손 없이 이어진 자동 전달 수 */

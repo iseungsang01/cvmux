@@ -26,6 +26,9 @@ macOS를 쓴다면 cmux가 낫다.
 - **사이드바 신호등** — 실행 중·대기·확인 필요를 구분하고 git 브랜치와 리슨 포트를 붙인다
 - **에이전트 알림** — 에이전트가 확인을 기다리면 파란 링과 Windows 토스트. 놓친 것은 알림함에 남는다
 - **분할·탭·여러 창**, **트레이 상주** — 창을 닫아도 세션은 계속 돈다
+- **키보드로 pane 다루기** — tmux처럼 이동·크기·확대·동시 입력을 키 하나로
+- **작업마다 worktree 하나** — Orca처럼 브랜치마다 작업 트리를 만들어 에이전트끼리 파일을 밟지 않게
+- **긴 명령이 끝나면 알림** — `npm test 실패 · 2분 13초`
 - **복원** — 껐다 켜면 배치·작업 디렉토리·이름이 돌아오고 에이전트 대화도 이어서 뜬다
 - **`cvmux` CLI** — 세션 안에서 워크스페이스·pane·입력·화면을 조종한다
 - **에이전트끼리 답 넘기기** — 분할선의 ⇄를 켜면 Claude Code와 Codex가 서로의 답을 받아 일한다
@@ -56,7 +59,7 @@ Windows 10 1809 이상이 필요하다(ConPTY).
 
 점선은 cvmux의 추측이고, 실선 + 점은 프로세스가 직접 한 말이다.
 
-- 제목 아래에 **git 브랜치**(변경이 있으면 점, `↑2 ↓1`)와 **리슨 포트**(`:5173`)가 붙는다.
+- 제목 아래에 **git 브랜치**(바뀐 파일 수 `●3`, `↑2 ↓1`, worktree면 `⑂`)와 **리슨 포트**(`:5173`)가 붙는다.
   포트는 세션이 띄운 프로세스 전체에서 찾으므로 `npm run dev`가 연 것도 잡힌다
 - 제목은 **더블클릭**해서 바꾸고, 줄은 끌어서 순서를 바꾼다
 - 셸 통합이 작업 디렉토리를 따라가므로 `cd`하면 저장소와 브랜치도 바뀐다
@@ -66,6 +69,10 @@ Windows 10 1809 이상이 필요하다(ConPTY).
 
 - **분할** — `Alt+Shift+=` 오른쪽, `Alt+Shift+-` 아래. 경계는 끌어서 조정한다.
   가장 손이 필요한 pane이 사이드바에 대표로 올라온다
+- **키보드로** — `Alt+화살표`로 옆 pane에 가고, `Alt+Shift+화살표`로 경계를 민다(그쪽에
+  pane이 없으면 키는 셸로 간다). `Ctrl+Shift+Enter`는 지금 pane만 크게 — 다시 누르면 돌아온다.
+  팔레트에서 "pane 크기 고르게", "이 pane을 새 워크스페이스로", "보이는 pane 모두에 동시 입력"
+  (tmux의 synchronize-panes — 켜져 있으면 보라 테두리)
 - **탭** — `Ctrl+Shift+T`로 pane 안에 탭을 더한다. 끌어서 순서를 바꾼다
 - **창** — `Ctrl+Alt+N`. 모니터마다 창을 두고 워크스페이스를 옮길 수 있다
 - **트레이** — 창을 닫아도(X) 앱은 트레이에 남고 세션은 계속 돈다.
@@ -83,6 +90,10 @@ Windows 10 1809 이상이 필요하다(ConPTY).
 | `Ctrl+Shift+N` | 새 세션 (보고 있던 디렉토리에서) |
 | `Ctrl+Alt+N` | 새 창 |
 | `Alt+Shift+=` / `Alt+Shift+-` | 오른쪽 / 아래로 분할 |
+| `Alt+화살표` | 그쪽 pane으로 |
+| `Alt+Shift+화살표` | 경계를 그쪽으로 |
+| `Ctrl+Shift+Enter` | 이 pane만 크게 / 되돌리기 |
+| `` Ctrl+Alt+` `` | 바로 전에 보던 워크스페이스 |
 | `Ctrl+Shift+W` | pane 닫기 (마지막 pane이면 세션 전체) |
 | `Ctrl+Shift+T` | 이 pane에 새 탭 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 다음 / 이전 탭 |
@@ -133,6 +144,16 @@ cvmux hooks setup --agent codex    # Codex — 그다음 Codex 안에서 /hooks�
 줘"라고 하면 스스로 훅을 걸고 협업 규칙을 `~/.codex/AGENTS.md`에 넣는다(`/hooks` 승인과
 재시작은 사람 몫).
 
+**작업마다 worktree 하나** — 팔레트의 "새 worktree에서 작업…"에 브랜치 이름을 적으면 저장소
+옆 `<저장소>.worktrees\<브랜치>`에 작업 트리를 만들고 그 자리에 워크스페이스를 연다(브랜치가
+있으면 꺼내고, 없으면 지금 보던 HEAD에서 판다). 끝나면 "이 worktree 정리" — 세션을 닫고 폴더를
+지운다. 커밋하지 않은 변경이 있으면 지우지 않고, 합쳐지지 않은 브랜치는 남긴다.
+
+```powershell
+cvmux new-workspace --worktree feat/login     # --base origin/main
+cvmux remove-worktree                          # 지금 워크스페이스
+```
+
 **알림 보내기** — 스크립트나 훅에서:
 
 ```powershell
@@ -140,7 +161,8 @@ cvmux notify --title "빌드" "배포 준비 완료"
 ```
 
 터미널 알림 시퀀스(OSC 9 / 777 / 99, BEL)도 알아듣는다. 훅이 없어도 출력이 멎으면
-"입력 대기(추정)"로 표시된다.
+"입력 대기(추정)"로 표시된다. 셸에서 직접 친 명령이 30초보다 오래 걸렸다면 끝날 때
+`npm test 실패 · 2분 13초`처럼 알린다(`terminal.notifyCommandSeconds`, 0이면 끔).
 
 **사이드바에 쓰기** — 에이전트가 자기 진행 상황을 직접 적는다.
 
@@ -172,6 +194,7 @@ cvmux new-workspace C:\repo            # 그 디렉토리에서 새 워크스페
 cvmux new-split down                   # 아래로 분할
 cvmux send --session 2 "npm test" --enter
 cvmux read-screen --lines 40           # 화면을 텍스트로
+cvmux zoom-pane                        # tmux의 resize-pane -Z (resize-pane · break-pane · sync-panes도)
 cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
 ```
 
@@ -195,7 +218,12 @@ cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
   "theme": { "background": "#0d1016", "blue": "#7aa2f7" },
   "keybindings": { "view.palette": "Alt+Shift+P" },
   "relay": { "maxAutoTurns": 10 },   // 옆 에이전트에게 자동으로 넘기는 연속 횟수 상한
-  "update": { "enabled": true }
+  "update": { "enabled": true },
+  // 팔레트 맨 위에 올릴 내 명령. target: current(지금 pane) · tab(새 탭) · workspace
+  "commands": [
+    { "name": "테스트", "command": "npm test" },
+    { "name": "개발 서버", "command": "npm run dev", "target": "tab" }
+  ]
 }
 ```
 
@@ -208,6 +236,10 @@ cvmux events --name session.notify     # 이벤트를 줄 단위 JSON으로
 앱 자체는 세션 6개를 켜 둔 기준 150MB 안팎이고, 창에서 포커스가 떠나면 10초 뒤
 working set을 비워 10MB대로 내려간다(다시 보면 필요한 만큼만 돌아온다). GPU 가속은
 쓰지 않는다 — 터미널은 DOM으로 그리고, 내장 브라우저도 소프트웨어로 그린다.
+
+tmux·Orca·cmux에서 기능을 들여올 때도 상주 프로세스·폴링·인덱스·내장 편집기가 필요한
+것은 들이지 않았다(세션 데몬, diff 뷰어, PR 상태 폴링 등). 무엇을 왜 뺐는지는
+[POLICY.md](./POLICY.md)의 "가져온 것과 버린 것"에 있다.
 
 ## 업데이트
 

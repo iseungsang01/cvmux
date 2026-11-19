@@ -50,8 +50,54 @@ export interface SessionStateHooks {
   onNotify(text: string): void
   /** 셸이 OSC 7로 작업 디렉토리를 보고했을 때 */
   onCwd(cwd: string): void
-  /** 셸이 OSC 133;D로 명령이 끝났다고 알렸을 때 — 그 아래서 돌던 것도 함께 끝났다. P14-14 */
-  onCommandDone(): void
+  /** 셸이 OSC 133;D로 명령이 끝났다고 알렸을 때 — 그 아래서 돌던 것도 함께 끝났다. P14-14 / P32 */
+  onCommandDone(done: CommandDone): void
+}
+
+/** 셸 통합이 알려 준 명령 하나의 끝 (P32-1) */
+export interface CommandDone {
+  /** 133;C부터 133;D까지. 시작을 못 봤으면(첫 프롬프트, 빈 Enter) null */
+  durationMs: number | null
+  /** 133;D;<코드>. PowerShell은 성공 0 / 실패 1만 안다 */
+  exitCode: number | null
+  /** 633;E로 받은 명령줄. 모르면 null */
+  command: string | null
+}
+
+/** 알림에 실을 명령줄의 길이 — 셸이 보내는 쪽에서도 같은 길이로 자른다 */
+const MAX_COMMAND_CHARS = 200
+
+/** 알림에서 보여줄 명령줄의 길이 — 토스트 한 줄에 들어가야 한다 */
+const SHOWN_COMMAND_CHARS = 60
+
+/**
+ * 오래 걸린 명령이 끝났을 때의 알림 문구 (P32-1).
+ *
+ * 무엇이·어떻게·얼마나 — 셋이면 토스트만 보고도 돌아가 볼지 정할 수 있다.
+ */
+export function commandDoneText(done: CommandDone): string {
+  const raw = done.command ?? ''
+  const what = raw
+    ? raw.length > SHOWN_COMMAND_CHARS
+      ? `${raw.slice(0, SHOWN_COMMAND_CHARS - 1)}…`
+      : raw
+    : '명령'
+  const failed = done.exitCode !== null && done.exitCode !== 0
+  return `${what} ${failed ? '실패' : '끝남'} · ${formatElapsed(done.durationMs ?? 0)}`
+}
+
+/** 42초 · 2분 13초 · 1시간 5분 */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  if (total < 60) return `${total}초`
+  const minutes = Math.floor(total / 60)
+  if (minutes < 60) {
+    const seconds = total % 60
+    return seconds === 0 ? `${minutes}분` : `${minutes}분 ${seconds}초`
+  }
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${hours}시간` : `${hours}시간 ${rest}분`
 }
 
 export class SessionState {
@@ -76,6 +122,10 @@ export class SessionState {
   /** 셸이 OSC 133을 보내고 있는가 — 그렇다면 정규식 휴리스틱을 쓰지 않는다 */
   private shellIntegration = false
   private commandRunning = false
+  /** 133;C를 받은 시각. 0이면 지금 도는 명령의 시작을 보지 못했다. P32-1 */
+  private commandStartedAt = 0
+  /** 633;E로 받은, 지금 도는 명령의 명령줄. P32-1 */
+  private commandLine: string | null = null
   private disposed = false
 
   constructor(private readonly hooks: SessionStateHooks) {
@@ -166,6 +216,8 @@ export class SessionState {
     this.notification = null
     this.shellIntegration = false
     this.commandRunning = false
+    this.commandStartedAt = 0
+    this.commandLine = null
     this.suppressUntil = 0
     this.lastInputAt = 0
     this.set('busy', 'inferred')
@@ -252,6 +304,14 @@ export class SessionState {
         this.handleShellIntegration(rest)
         break
 
+      // 633;E;<명령줄> — 막 시작한 명령이 무엇인지. VS Code와 같은 번호를 쓴다. P32-1
+      case '633':
+        if (rest.startsWith('E;')) {
+          const line = rest.slice(2).trim()
+          this.commandLine = line ? line.slice(0, MAX_COMMAND_CHARS) : null
+        }
+        break
+
       default:
         break
     }
@@ -263,12 +323,22 @@ export class SessionState {
     if (kind === 'C') {
       // 명령 실행 시작
       this.commandRunning = true
+      this.commandStartedAt = Date.now()
       this.set('busy', 'certain')
     } else if (kind === 'D') {
       // 명령 종료 — 프롬프트로 돌아온다
+      const durationMs = this.commandStartedAt > 0 ? Date.now() - this.commandStartedAt : null
+      const code = /^D;(-?\d+)/.exec(rest)
+      const command = durationMs === null ? null : this.commandLine
       this.commandRunning = false
+      this.commandStartedAt = 0
+      this.commandLine = null
       if (!this.unread) this.set('idle', 'certain')
-      this.hooks.onCommandDone()
+      this.hooks.onCommandDone({
+        durationMs,
+        exitCode: code ? Number.parseInt(code[1], 10) : null,
+        command
+      })
     } else if (kind === 'A' || kind === 'B') {
       this.commandRunning = false
     }

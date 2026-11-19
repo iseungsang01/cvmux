@@ -72,8 +72,9 @@ export function isFailedExit(session: SessionMeta): boolean {
 /** 브랜치 옆 툴팁 문구. P13-9 (표시는 말줄임, 전체는 여기로) */
 export function gitTooltip(git: GitInfo): string {
   const parts = [git.detached ? `detached at ${git.branch}` : `브랜치 ${git.branch}`]
+  if (git.worktree) parts.push('작업 트리(worktree)')
   if (git.operation) parts.push(`${git.operation} 진행 중`)
-  if (git.dirty) parts.push('변경사항 있음')
+  if (git.changes > 0) parts.push(`바뀐 파일 ${git.changes}개`)
   if (git.ahead > 0) parts.push(`${git.ahead} 커밋 앞섬`)
   if (git.behind > 0) parts.push(`${git.behind} 커밋 뒤처짐`)
   return parts.join(' · ')

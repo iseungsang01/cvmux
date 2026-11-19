@@ -1,6 +1,6 @@
 import { resolveHandle, M, M_INTERNAL, type ControlErrorCode } from '@shared/protocol'
 import type { BrowserMeta, PaneNode, SessionMeta, Workspace } from '@shared/types'
-import { collectAllSurfaces, collectLeaves } from './layout'
+import { collectAllSurfaces, collectLeaves, type PaneDirection } from './layout'
 import { focusedSessionId, sessionIdOfPane, workspaceTitle } from './workspace'
 
 /**
@@ -63,6 +63,23 @@ export interface ControlContext {
     scope: 'session' | 'all',
     query?: string
   ): void
+
+  // ── 키보드로 pane 다루기 (P30) ──
+  /** 그 방향의 pane으로. 없으면 null */
+  focusToward(workspaceId: string, direction: PaneDirection, from: string): string | null
+  /** 경계를 민다. 옮길 경계가 없으면 false */
+  resizePane(workspaceId: string, direction: PaneDirection, step: number, paneId: string): boolean
+  /** 확대. state가 없으면 뒤집는다. 바뀐 뒤의 값 */
+  setZoom(workspaceId: string, state?: boolean): boolean
+  equalize(workspaceId: string): void
+  /** pane을 새 워크스페이스로. 마지막 pane이면 null */
+  breakPane(workspaceId: string, paneId: string): string | null
+  /** 동시 입력. state가 없으면 뒤집는다. 바뀐 뒤의 값 */
+  setSync(workspaceId: string, state?: boolean): boolean
+
+  // ── 작업마다 worktree 하나 (P31) ──
+  createWorktree(branch: string, options: { cwd?: string; base?: string }): Promise<string>
+  removeWorktree(workspaceId: string, confirm: boolean): Promise<{ removed: boolean; message: string | null }>
 }
 
 /**
@@ -100,7 +117,12 @@ export async function handleControl(
     case M.WORKSPACE_CREATE: {
       const cwd = optionalString(params.cwd)
       const title = optionalString(params.title)
-      const workspaceId = await ctx.create({ cwd, title })
+      // 브랜치를 주면 그 이름의 작업 트리를 만들고 그 자리에 연다. P31-1
+      const worktree = optionalString(params.worktree)
+      const workspaceId =
+        worktree !== undefined
+          ? await ctx.createWorktree(worktree, { cwd, base: optionalString(params.base) })
+          : await ctx.create({ cwd, title })
       const list = ctx.workspaces()
       const index = list.findIndex((w) => w.id === workspaceId)
       // 방금 만든 것이 목록에 아직 없을 수 있다 — id만이라도 돌려준다
@@ -221,8 +243,69 @@ export async function handleControl(
       const workspace = pickWorkspace(params, ctx)
       const pane = pickPane(workspace, params)
       ctx.select(workspace.id)
+      // 방향을 주면 그 pane에서 그쪽 이웃으로 간다. P30-1
+      const rawDirection = optionalString(params.direction)
+      if (rawDirection !== undefined) {
+        const direction = paneDirection(rawDirection)
+        const target = ctx.focusToward(workspace.id, direction, pane)
+        if (target === null) throw new ControlRequestError(`${rawDirection} 쪽에 pane이 없습니다`, 'not_found')
+        return { workspace_id: workspace.id, pane_id: target }
+      }
       ctx.focusPane(workspace.id, pane)
       return { workspace_id: workspace.id, pane_id: pane }
+    }
+
+    // ── 키보드로 pane 다루기 (P30) ───────────────────────────
+    case M.PANE_ZOOM: {
+      const workspace = pickWorkspace(params, ctx)
+      const zoomed = ctx.setZoom(workspace.id, toggleState(params.state))
+      return { workspace_id: workspace.id, zoomed }
+    }
+
+    case M.PANE_RESIZE: {
+      const workspace = pickWorkspace(params, ctx)
+      const pane = pickPane(workspace, params)
+      const direction = paneDirection(String(params.direction ?? ''))
+      // 칸 몫의 백분율. tmux는 칸 수로 세지만 여기 분할은 비율이다
+      const amount = params.amount === undefined ? 5 : Number(params.amount)
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 90) {
+        throw new ControlRequestError('amount는 1~90 사이의 백분율이어야 합니다')
+      }
+      if (!ctx.resizePane(workspace.id, direction, amount / 100, pane)) {
+        throw new ControlRequestError('그 방향으로 옮길 경계가 없습니다', 'invalid_state')
+      }
+      return { workspace_id: workspace.id, pane_id: pane, direction, amount }
+    }
+
+    case M.PANE_EQUALIZE: {
+      const workspace = pickWorkspace(params, ctx)
+      ctx.equalize(workspace.id)
+      return { workspace_id: workspace.id }
+    }
+
+    case M.PANE_BREAK: {
+      const workspace = pickWorkspace(params, ctx)
+      const pane = pickPane(workspace, params)
+      const created = ctx.breakPane(workspace.id, pane)
+      if (created === null) throw new ControlRequestError('pane이 하나뿐이라 떼어 낼 것이 없습니다', 'invalid_state')
+      return { workspace_id: created, from_workspace_id: workspace.id, pane_id: pane }
+    }
+
+    case M.WORKSPACE_SYNC: {
+      const workspace = pickWorkspace(params, ctx)
+      const sync = ctx.setSync(workspace.id, toggleState(params.state))
+      return { workspace_id: workspace.id, sync }
+    }
+
+    // ── 작업마다 worktree 하나 (P31-3) ───────────────────────
+    case M.WORKTREE_REMOVE: {
+      const workspace = pickWorkspace(params, ctx)
+      // 스크립트는 이미 결정을 내렸다 — 묻지 않는다(P26-3과 같다). --confirm이면 묻는다
+      const result = await ctx.removeWorktree(workspace.id, params.confirm === true)
+      if (!result.removed) {
+        throw new ControlRequestError(result.message ?? '취소했습니다', 'invalid_state')
+      }
+      return { workspace_id: workspace.id, removed: true, message: result.message }
     }
 
     case M.PANE_CLOSE: {
@@ -400,6 +483,25 @@ function resolveSession(ref: string, ctx: ControlContext): SessionMeta {
   return found
 }
 
+/** `left|right|up|down` (tmux의 -L/-R/-U/-D). P30 */
+function paneDirection(raw: string): PaneDirection {
+  const value = raw.toLowerCase()
+  const alias: Record<string, PaneDirection> = { l: 'left', r: 'right', u: 'up', d: 'down' }
+  const direction = alias[value] ?? value
+  if (direction === 'left' || direction === 'right' || direction === 'up' || direction === 'down') {
+    return direction
+  }
+  throw new ControlRequestError(`방향은 left/right/up/down 중 하나여야 합니다: ${raw}`)
+}
+
+/** `on|off|toggle` — 없거나 toggle이면 뒤집는다(undefined) */
+function toggleState(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null || raw === '' || raw === 'toggle') return undefined
+  if (raw === true || raw === 'on' || raw === 'true') return true
+  if (raw === false || raw === 'off' || raw === 'false') return false
+  throw new ControlRequestError(`state는 on/off/toggle 중 하나여야 합니다: ${String(raw)}`)
+}
+
 /** cmux의 `--direction right|down`을 cvmux의 flex 방향으로. P17-1 */
 function splitDirection(raw: string): 'row' | 'column' | null {
   if (raw === 'right' || raw === 'left' || raw === 'row' || raw === 'horizontal') return 'row'
@@ -433,7 +535,12 @@ function workspacePayload(
     ports: meta?.ports ?? [],
     status: meta?.status ?? null,
     unread: collectAllSurfaces(workspace.root).some((id) => sessions.get(id)?.unread === true),
-    pane_count: collectLeaves(workspace.root).length
+    pane_count: collectLeaves(workspace.root).length,
+    // P13-14 / P30 / P31
+    changes: meta?.git?.changes ?? 0,
+    worktree: meta?.git?.worktree ?? false,
+    zoomed: workspace.zoomed === true,
+    sync: workspace.syncInput === true
   }
 }
 

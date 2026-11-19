@@ -6,7 +6,9 @@
  *
  * 실행: npm test
  */
-import type { PaneNode } from '../src/shared/types'
+import { M } from '../src/shared/protocol'
+import type { PaneNode, SessionMeta, Workspace } from '../src/shared/types'
+import { ControlRequestError, handleControl, type ControlContext } from '../src/renderer/lib/control'
 import {
   addSurface,
   closePane,
@@ -15,15 +17,20 @@ import {
   collectSessionIds,
   createLeaf,
   cycleSurface,
+  equalizeSplits,
+  extractPane,
   findLeafBySession,
   firstLeafId,
+  leafRects,
   moveSurface,
+  neighborPane,
   paneCount,
   resizeSplit,
+  resizeToward,
   selectSurface,
   splitPane
 } from '../src/renderer/lib/layout'
-import { reorder } from '../src/renderer/lib/workspace'
+import { inputTargets, reorder } from '../src/renderer/lib/workspace'
 
 const results: string[] = []
 let failed = 0
@@ -50,7 +57,7 @@ function depth(node: PaneNode): number {
   return node.kind === 'leaf' ? 1 : 1 + Math.max(...node.children.map(depth))
 }
 
-function main(): void {
+async function main(): Promise<void> {
   // ── P17-1: 잎 하나를 나누면 split이 된다
   {
     const root = createLeaf('s1')
@@ -345,9 +352,179 @@ function main(): void {
     check('제자리면 그대로', shape(moveSurface(tree, paneId, 1, 1)) === shape(tree))
   }
 
+  // ── P30: 키보드로 pane 다루기
+  {
+    /*
+     * 모양:  a | b
+     *        --+
+     *        c | b      → 왼쪽은 a 위·c 아래, 오른쪽은 b 하나
+     */
+    const a = createLeaf('a')
+    const ab = splitPane(a, a.id, 'row', 'b')
+    const abc = ab ? splitPane(ab.root, a.id, 'column', 'c') : null
+    if (!ab || !abc) {
+      check('P30 준비', false, '분할 실패')
+    } else {
+      const tree = abc.root
+      const paneOf = (s: string): string => findLeafBySession(tree, s)!.id
+      const pa = paneOf('a')
+      const pb = paneOf('b')
+      const pc = paneOf('c')
+
+      const ra = leafRects(tree).get(pa)!
+      check('P30-1 자리 계산', ra.x === 0 && ra.y === 0 && ra.w === 0.5 && ra.h === 0.5, JSON.stringify(ra))
+
+      check('P30-1 오른쪽 이웃', neighborPane(tree, pa, 'right') === pb)
+      check('P30-1 아래 이웃', neighborPane(tree, pa, 'down') === pc)
+      check(
+        'P30-1 그 방향에 없으면 null',
+        neighborPane(tree, pa, 'left') === null && neighborPane(tree, pa, 'up') === null
+      )
+      check('P30-1 아래쪽 pane에서 오른쪽', neighborPane(tree, pc, 'right') === pb)
+      check('P30-1 없는 pane', neighborPane(tree, 'nope', 'right') === null)
+      // b에서 왼쪽으로 가면 a와 c가 둘 다 맞닿는다 — 한가운데(0.5)를 덮는 쪽은 c다
+      check('P30-1 둘이 맞닿으면 가운데를 마주 보는 쪽', neighborPane(tree, pb, 'left') === pc)
+
+      // 오른쪽 이웃이 있으면 오른쪽 경계를 밀어 a가 커진다
+      const grown = resizeToward(tree, pa, 'right', 0.1)
+      const grownLeft = grown.kind === 'split' ? grown.sizes[0] : -1
+      check('P30-3 화살표 쪽 경계를 민다', Math.abs(grownLeft - 0.6) < 1e-9, String(grownLeft))
+
+      // b는 오른쪽 끝이다 — 왼쪽 경계를 오른쪽으로 밀어 b가 작아진다
+      const shrunk = resizeToward(tree, pb, 'right', 0.1)
+      const shrunkRight = shrunk.kind === 'split' ? shrunk.sizes[1] : -1
+      check(
+        'P30-3 끝에 붙은 pane은 반대쪽 경계를 같은 방향으로',
+        Math.abs(shrunkRight - 0.4) < 1e-9,
+        String(shrunkRight)
+      )
+
+      // a의 아래 경계 — 안쪽(세로) 분할이 움직인다
+      const taller = resizeToward(tree, pa, 'down', 0.1)
+      const inner =
+        taller.kind === 'split' && taller.children[0].kind === 'split' ? taller.children[0].sizes[0] : -1
+      check('P30-3 세로 방향은 안쪽 분할', Math.abs(inner - 0.6) < 1e-9, String(inner))
+
+      const single = createLeaf('x')
+      check('P30-3 분할이 없으면 그대로', resizeToward(single, single.id, 'left') === single)
+
+      const even = equalizeSplits(resizeToward(tree, pa, 'right', 0.2))
+      const evenSizes = even.kind === 'split' ? even.sizes.join(',') : ''
+      check('P30-5 고르게', evenSizes === '0.5,0.5', evenSizes)
+      check('P30-5 모양은 그대로', shape(even) === shape(tree), shape(even))
+
+      const taken = extractPane(tree, pb)
+      check('P30-6 빼낸 잎', taken !== null && taken.leaf.surfaces.join(',') === 'b')
+      check(
+        'P30-6 남은 트리',
+        taken !== null && taken.rest !== null && shape(taken.rest) === 'V(a c)',
+        taken?.rest ? shape(taken.rest) : 'null'
+      )
+      const last = createLeaf('only')
+      const lastTaken = extractPane(last, last.id)
+      check('P30-6 마지막 잎이면 남은 트리 없음', lastTaken !== null && lastTaken.rest === null)
+      check('P30-6 없는 pane', extractPane(tree, 'nope') === null)
+    }
+  }
+
+  // ── P30-7: 동시 입력은 보이는 터미널에만, 키만
+  {
+    const a = createLeaf('a')
+    const ab = splitPane(a, a.id, 'row', 'b')!
+    // b pane에 탭 c를 더하고 b를 보이게 둔다 — c는 숨은 탭이다
+    const bPane = findLeafBySession(ab.root, 'b')!.id
+    const withTab = selectSurface(addSurface(ab.root, bPane, 'c')!, bPane, 0)
+    const ws: Workspace = { id: 'w', title: null, root: withTab, focusedPaneId: a.id, syncInput: true }
+    const meta = (id: string, status: SessionMeta['status'] = 'idle'): SessionMeta =>
+      ({ id, status }) as SessionMeta
+    const sessions = [meta('a'), meta('b'), meta('c')]
+
+    check('P30-7 보이는 터미널 모두', inputTargets('a', 'ls\r', [ws], sessions).join(',') === 'a,b')
+    check('P30-7 마우스는 친 곳만', inputTargets('a', '\x1b[<0;3;4M', [ws], sessions).join(',') === 'a')
+    check(
+      'P30-7 끄면 친 곳만',
+      inputTargets('a', 'x', [{ ...ws, syncInput: false }], sessions).join(',') === 'a'
+    )
+    check(
+      'P30-7 끝난 셸에는 보내지 않는다',
+      inputTargets('a', 'x', [ws], [meta('a'), meta('b', 'exited')]).join(',') === 'a'
+    )
+  }
+
+  // ── P30 / P31: 소켓 요청
+  {
+    const a = createLeaf('a')
+    const ab = splitPane(a, a.id, 'row', 'b')!
+    const ws: Workspace = { id: 'w1', title: null, root: ab.root, focusedPaneId: a.id }
+    const calls: string[] = []
+    const ctx = {
+      workspaces: () => [ws],
+      sessions: () => new Map(),
+      browsers: () => new Map(),
+      activeId: () => 'w1',
+      rightSidebarOpen: () => false,
+      select: () => {},
+      focusPane: () => {},
+      focusToward: (_w: string, dir: string, from: string) => {
+        calls.push(`focus:${dir}:${from === a.id}`)
+        return dir === 'right' ? ab.newPaneId : null
+      },
+      resizePane: (_w: string, dir: string, step: number) => {
+        calls.push(`resize:${dir}:${step}`)
+        return dir !== 'up'
+      },
+      setZoom: (_w: string, state?: boolean) => {
+        calls.push(`zoom:${String(state)}`)
+        return state ?? true
+      },
+      setSync: (_w: string, state?: boolean) => {
+        calls.push(`sync:${String(state)}`)
+        return state ?? true
+      },
+      equalize: () => calls.push('equalize'),
+      breakPane: () => 'w2',
+      createWorktree: async (branch: string, options: { base?: string }) => {
+        calls.push(`worktree:${branch}:${options.base ?? ''}`)
+        return 'w3'
+      },
+      create: async () => 'w4',
+      removeWorktree: async (_w: string, confirm: boolean) => {
+        calls.push(`remove:${confirm}`)
+        return { removed: false, message: '커밋하지 않은 변경이 있어 지우지 않습니다' }
+      }
+    } as unknown as ControlContext
+
+    const focus = (await handleControl(M.PANE_FOCUS, { direction: 'right' }, ctx)) as { pane_id: string }
+    check('P30-1 소켓 방향 이동', focus.pane_id === ab.newPaneId && calls.includes('focus:right:true'))
+    const noNeighbor = await handleControl(M.PANE_FOCUS, { direction: 'l' }, ctx).catch((e: ControlRequestError) => e.code)
+    check('P30-1 이웃이 없으면 not_found', noNeighbor === 'not_found', String(noNeighbor))
+    const badDir = await handleControl(M.PANE_RESIZE, { direction: 'sideways' }, ctx).catch((e: ControlRequestError) => e.code)
+    check('P30-3 모르는 방향은 invalid_params', badDir === 'invalid_params', String(badDir))
+    await handleControl(M.PANE_RESIZE, { direction: 'right', amount: 10 }, ctx)
+    check('P30-3 백분율을 비율로', calls.includes('resize:right:0.1'))
+    const stuck = await handleControl(M.PANE_RESIZE, { direction: 'up' }, ctx).catch((e: ControlRequestError) => e.code)
+    check('P30-3 옮길 경계가 없으면 invalid_state', stuck === 'invalid_state', String(stuck))
+
+    await handleControl(M.PANE_ZOOM, {}, ctx)
+    await handleControl(M.PANE_ZOOM, { state: 'off' }, ctx)
+    check('P30-4 생략하면 뒤집고 off는 끈다', calls.includes('zoom:undefined') && calls.includes('zoom:false'))
+    await handleControl(M.WORKSPACE_SYNC, { state: 'on' }, ctx)
+    check('P30-7 동시 입력 켜기', calls.includes('sync:true'))
+
+    const created = (await handleControl(
+      M.WORKSPACE_CREATE,
+      { worktree: 'feat/x', base: 'main' },
+      ctx
+    )) as { id: string }
+    check('P31-1 --worktree는 작업 트리로', created.id === 'w3' && calls.includes('worktree:feat/x:main'))
+    const refused = await handleControl(M.WORKTREE_REMOVE, {}, ctx).catch((e: ControlRequestError) => e.message)
+    check('P31-3 소켓은 묻지 않는다', calls.includes('remove:false'))
+    check('P31-3 거절 사유를 그대로', String(refused).includes('변경'), String(refused))
+  }
+
   console.log(results.join('\n'))
   console.log(`\n${results.length - failed}/${results.length} passed`)
   process.exit(failed === 0 ? 0 : 1)
 }
 
-main()
+void main()

@@ -8,6 +8,7 @@ import {
 } from 'react'
 
 import type { BrowserMeta, PaneNode, RelayMode, SessionMeta } from '@shared/types'
+import { findLeaf } from '../lib/layout'
 import { exitLabel, isFailedExit } from '../lib/format'
 import type { TerminalHost } from '../terminal-host'
 import { BrowserPane } from './BrowserPane'
@@ -32,6 +33,15 @@ interface PaneTreeProps {
   focusedPaneId: string
   /** 이 워크스페이스가 지금 화면에 보이는가 */
   visible: boolean
+  /**
+   * 포커스된 pane 하나만 띄운다 (P30-4).
+   *
+   * 나머지는 DOM에 그대로 두고 감추기만 한다 — 터미널을 새로 붙이지 않으니
+   * 스크롤백도 그대로고(P5-1), 풀면 크기만 다시 맞춘다.
+   */
+  zoomed: boolean
+  /** 친 키가 보이는 터미널 전부로 간다 — 잊으면 안 되므로 pane마다 표시한다 (P30-7) */
+  syncInput: boolean
   onFocusPane(paneId: string): void
   onResize(splitId: string, dividerIndex: number, ratioDelta: number, minRatio: number): void
   /** 가로 탭 (P24) */
@@ -183,6 +193,8 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
     host,
     focusedPaneId,
     visible,
+    zoomed,
+    syncInput,
     onFocusPane,
     onResize,
     onSelectSurface,
@@ -209,6 +221,22 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
 
     return (
       <div className="pane-stack">
+        {/* 확대·동시 입력은 화면이 평소와 다르다는 표시다 — 잊은 채 치지 않게 (P30-4 / P30-7) */}
+        {focused && (zoomed || (syncInput && session)) && (
+          <div className="pane-badges">
+            {zoomed && (
+              <span className="pane-badge is-zoom" title="확대 중 — 다시 누르면 풉니다">
+                ⤢ 확대
+              </span>
+            )}
+            {syncInput && session && (
+              <span className="pane-badge is-sync" title="친 키가 보이는 pane 모두에 갑니다">
+                ⇶ 동시 입력
+              </span>
+            )}
+          </div>
+        )}
+
         {/*
           탭 바는 탭이 둘 이상일 때만 그린다 (P24-1).
 
@@ -244,6 +272,7 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
             host={host}
             focused={focused}
             visible={visible}
+            sync={syncInput}
             onFocus={onFocusPane}
           />
         )}
@@ -252,29 +281,41 @@ export function PaneTree(props: PaneTreeProps): JSX.Element | null {
   }
 
   return (
-    <div className={`split is-${node.direction}`}>
-      {node.children.map((child, index) => (
-        <PaneFragment key={child.id}>
-          {/*
-            비율은 flex-grow로 준다. flex-basis 백분율로 주면 divider 두께가
-            더해져 합이 100%를 넘고, 첫 칸이 나머지를 밀어내 버린다.
-            grow는 divider가 쓰고 남은 공간만 비율대로 나눈다.
-          */}
-          <div className="split-slot" style={{ flexGrow: node.sizes[index] }}>
-            <PaneTree {...props} node={child} />
-          </div>
-          {index < node.children.length - 1 && (
-            <Divider
-              direction={node.direction}
-              onDrag={(delta, minRatio) => onResize(node.id, index, delta, minRatio)}
-              relay={relayPair(child, node.children[index + 1], sessions)}
-              onSetRelay={onSetRelay}
-              relayLimit={relayLimit}
-              onSetRelayLimit={onSetRelayLimit}
-            />
-          )}
-        </PaneFragment>
-      ))}
+    <div className={`split is-${node.direction}`} data-split-id={node.id}>
+      {node.children.map((child, index) => {
+        /*
+         * 확대 중이면 포커스된 pane으로 가는 길만 남긴다 (P30-4).
+         *
+         * 감춘 칸에는 visible=false를 내려보낸다 — 켜지 않은 세션을 깨우지 않고(P28-2)
+         * 브라우저는 네이티브 뷰를 떼어 낸다(P23-2). 크기 0인 터미널은 fit을 건너뛴다(P2-3).
+         */
+        const onPath = !zoomed || findLeaf(child, focusedPaneId) !== null
+        return (
+          <PaneFragment key={child.id}>
+            {/*
+              비율은 flex-grow로 준다. flex-basis 백분율로 주면 divider 두께가
+              더해져 합이 100%를 넘고, 첫 칸이 나머지를 밀어내 버린다.
+              grow는 divider가 쓰고 남은 공간만 비율대로 나눈다.
+            */}
+            <div
+              className={`split-slot${onPath ? '' : ' is-zoom-hidden'}`}
+              style={{ flexGrow: zoomed ? 1 : node.sizes[index] }}
+            >
+              <PaneTree {...props} node={child} visible={visible && onPath} />
+            </div>
+            {!zoomed && index < node.children.length - 1 && (
+              <Divider
+                direction={node.direction}
+                onDrag={(delta, minRatio) => onResize(node.id, index, delta, minRatio)}
+                relay={relayPair(child, node.children[index + 1], sessions)}
+                onSetRelay={onSetRelay}
+                relayLimit={relayLimit}
+                onSetRelayLimit={onSetRelayLimit}
+              />
+            )}
+          </PaneFragment>
+        )
+      })}
     </div>
   )
 }
@@ -502,6 +543,8 @@ interface TerminalPaneProps {
   host: TerminalHost
   focused: boolean
   visible: boolean
+  /** 동시 입력 중인 워크스페이스의 pane. P30-7 */
+  sync: boolean
   onFocus(paneId: string): void
 }
 
@@ -511,6 +554,7 @@ function TerminalPane({
   host,
   focused,
   visible,
+  sync,
   onFocus
 }: TerminalPaneProps): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -556,7 +600,9 @@ function TerminalPane({
     'pane',
     focused ? 'is-focused' : '',
     // 에이전트가 명시적으로 부른 pane에 노란 링. P4-1
-    attention ? 'is-attention' : ''
+    attention ? 'is-attention' : '',
+    // 동시 입력 — 친 키가 여기에도 온다. P30-7
+    sync ? 'is-sync' : ''
   ]
     .filter(Boolean)
     .join(' ')

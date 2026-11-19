@@ -1,5 +1,6 @@
+import { isBroadcastInput } from '@shared/input'
 import type { PaneNode, SessionMeta, SessionStatus, Workspace } from '@shared/types'
-import { activeSurface, collectSessionIds, createLeaf, findLeaf } from './layout'
+import { activeSurface, collectSessionIds, createLeaf, findLeaf, findLeafBySession } from './layout'
 
 /**
  * 워크스페이스(사이드바 한 줄)와 그 안의 pane들을 잇는 유틸 (POLICY.md P17).
@@ -91,4 +92,28 @@ export function reorder<T>(list: T[], from: number, to: number): T[] {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
   return next
+}
+
+/**
+ * 친 키를 보낼 세션들 (P30-7).
+ *
+ * 동시 입력을 켠 워크스페이스면 그 안의 **보이는** 터미널 전부, 아니면 친 곳
+ * 하나다. 숨은 탭에는 보내지 않는다 — 보이지 않는 곳에서 명령이 도는 것을 사람이
+ * 알아챌 길이 없다. 마우스 보고와 터미널의 자동 응답은 그 pane의 것이라 나누지
+ * 않는다. 끝난 셸은 받을 것이 없다.
+ */
+export function inputTargets(
+  sessionId: string,
+  data: string,
+  workspaces: Workspace[],
+  sessions: SessionMeta[]
+): string[] {
+  if (!isBroadcastInput(data)) return [sessionId]
+  const workspace = workspaces.find((w) => w.syncInput === true && findLeafBySession(w.root, sessionId) !== null)
+  if (!workspace) return [sessionId]
+  const visible = collectSessionIds(workspace.root)
+  if (!visible.includes(sessionId)) return [sessionId]
+  return visible.filter(
+    (id) => id === sessionId || sessions.some((s) => s.id === id && s.status !== 'exited')
+  )
 }

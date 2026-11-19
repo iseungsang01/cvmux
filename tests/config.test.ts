@@ -170,11 +170,55 @@ function main(): void {
     check('해석 안 되는 것만 빠진다', !bindings.has('bad') && bindings.has('good'))
   }
 
-  // 기본 단축키는 전부 해석된다 — 오타가 있으면 그 동작이 조용히 사라진다
+  // 기본 단축키는 전부 해석된다 — 오타가 있으면 그 동작이 조용히 사라진다.
+  // 빈 문자열은 "기본 조합 없음"이다(팔레트로만 쓰는 동작). P22-5
   {
     const bindings = compileBindings(DEFAULT_CONFIG.keybindings)
-    const total = Object.keys(DEFAULT_CONFIG.keybindings).length
+    const total = Object.values(DEFAULT_CONFIG.keybindings).filter((text) => text !== '').length
     check('기본 단축키가 모두 유효', bindings.size === total, `${bindings.size}/${total}`)
+  }
+
+  // 같은 조합이 두 동작에 걸리면 표에서 먼저 나온 쪽만 산다 — 기본값끼리 겹치면 안 된다
+  {
+    const seen = new Map<string, string>()
+    const clashes: string[] = []
+    for (const [action, text] of Object.entries(DEFAULT_CONFIG.keybindings)) {
+      const chord = parseChord(text)
+      if (chord === null) continue
+      const key = formatChord(chord)
+      const other = seen.get(key)
+      if (other) clashes.push(`${other}/${action}`)
+      else seen.set(key, action)
+    }
+    check('기본 단축키끼리 겹치지 않음', clashes.length === 0, clashes.join(','))
+  }
+
+  // P30: 화살표·백틱도 읽을 수 있게 적는다
+  {
+    check('P30 Alt+← 표기', formatChord(parseChord('Alt+Left')!) === 'Alt+←')
+    check('P30 Ctrl+Alt+` 표기', formatChord(parseChord('Ctrl+Alt+Backquote')!) === 'Ctrl+Alt+`')
+    const parsed = parseConfig({ terminal: { notifyCommandSeconds: 0 } })
+    check('P32-1 긴 명령 알림 끄기', parsed.config.terminal.notifyCommandSeconds === 0 && parsed.problems.length === 0)
+    const bad = parseConfig({ terminal: { notifyCommandSeconds: -1 } })
+    check('P32-1 음수는 기본값', bad.config.terminal.notifyCommandSeconds === 30 && bad.problems.length === 1)
+  }
+
+  // P33: 사용자 명령
+  {
+    const parsed = parseConfig({
+      commands: [
+        { name: '테스트', command: 'npm test' },
+        { name: '개발 서버', command: 'npm run dev', target: 'tab' },
+        { name: '', command: 'x' },
+        { name: '틀린 자리', command: 'y', target: 'nowhere' },
+        'npm run lint'
+      ]
+    })
+    const names = parsed.config.commands.map((c) => `${c.name}:${c.target}`).join(',')
+    check('P33 맞는 것만 읽는다', names === '테스트:current,개발 서버:tab,틀린 자리:current', names)
+    check('P33 틀린 것은 짚는다', parsed.problems.length === 3, JSON.stringify(parsed.problems))
+    check('P33 목록이 아니면', parseConfig({ commands: {} }).problems[0]?.path === 'commands')
+    check('P33 기본은 비어 있다', DEFAULT_CONFIG.commands.length === 0)
   }
 
   /*

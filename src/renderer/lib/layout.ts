@@ -351,3 +351,187 @@ function clampIndex(index: number, count: number): number {
 export function paneCount(node: PaneNode): number {
   return node.kind === 'leaf' ? 1 : node.children.reduce((n, c) => n + paneCount(c), 0)
 }
+
+// ── 키보드로 pane 다루기 (P30) ─────────────────────────────────
+
+export type PaneDirection = 'left' | 'right' | 'up' | 'down'
+
+/** 워크스페이스를 1×1로 볼 때 잎 하나가 차지하는 자리 */
+export interface PaneRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * 잎마다의 자리를 트리의 비율만으로 계산한다 (P30-1).
+ *
+ * DOM을 재지 않는다 — 숨은 워크스페이스나 확대(P30-4)로 가려진 pane도 자리를
+ * 알아야 이웃을 고를 수 있고, 순수 함수여야 테스트로 붙잡을 수 있다.
+ * 분할선 두께는 무시한다. 이웃을 고르는 데는 상대 위치만 있으면 된다.
+ */
+export function leafRects(root: PaneNode): Map<string, PaneRect> {
+  const out = new Map<string, PaneRect>()
+  const walk = (node: PaneNode, rect: PaneRect): void => {
+    if (node.kind === 'leaf') {
+      out.set(node.id, rect)
+      return
+    }
+    const total = node.sizes.reduce((a, b) => a + b, 0) || 1
+    let offset = 0
+    node.children.forEach((child, i) => {
+      const share = (node.sizes[i] ?? 0) / total
+      walk(
+        child,
+        node.direction === 'row'
+          ? { x: rect.x + rect.w * offset, y: rect.y, w: rect.w * share, h: rect.h }
+          : { x: rect.x, y: rect.y + rect.h * offset, w: rect.w, h: rect.h * share }
+      )
+      offset += share
+    })
+  }
+  walk(root, { x: 0, y: 0, w: 1, h: 1 })
+  return out
+}
+
+/** 부동소수점 비율이 맞닿았다고 볼 오차 */
+const EDGE_EPS = 1e-6
+
+/**
+ * 그 방향의 이웃 pane (P30-1).
+ *
+ * 맞닿은 것 중에서 고른다. 여럿이면 지금 pane의 **한가운데를 마주 보는** 것이
+ * 먼저다 — 오른쪽에 위아래로 둘이 있을 때 눈이 가는 쪽이 거기다. 그 방향에
+ * 아무것도 없으면 null이고, 그때 키는 셸로 흘려보낸다(P30-2).
+ */
+export function neighborPane(root: PaneNode, paneId: string, direction: PaneDirection): string | null {
+  const rects = leafRects(root)
+  const from = rects.get(paneId)
+  if (!from) return null
+
+  const horizontal = direction === 'left' || direction === 'right'
+  const center = horizontal ? from.y + from.h / 2 : from.x + from.w / 2
+
+  let best: string | null = null
+  let bestGap = Number.POSITIVE_INFINITY
+  let bestFacing = false
+  let bestOverlap = 0
+
+  for (const [id, r] of rects) {
+    if (id === paneId) continue
+    const gap =
+      direction === 'right'
+        ? r.x - (from.x + from.w)
+        : direction === 'left'
+          ? from.x - (r.x + r.w)
+          : direction === 'down'
+            ? r.y - (from.y + from.h)
+            : from.y - (r.y + r.h)
+    if (gap < -EDGE_EPS) continue
+
+    const [lo, hi, rLo, rHi] = horizontal
+      ? [from.y, from.y + from.h, r.y, r.y + r.h]
+      : [from.x, from.x + from.w, r.x, r.x + r.w]
+    const overlap = Math.min(hi, rHi) - Math.max(lo, rLo)
+    if (overlap <= EDGE_EPS) continue
+
+    const facing = rLo <= center + EDGE_EPS && center < rHi - EDGE_EPS
+    const closer = gap < bestGap - EDGE_EPS
+    const sameGap = Math.abs(gap - bestGap) <= EDGE_EPS
+    if (
+      closer ||
+      (sameGap && facing && !bestFacing) ||
+      (sameGap && facing === bestFacing && overlap > bestOverlap + EDGE_EPS)
+    ) {
+      best = id
+      bestGap = gap
+      bestFacing = facing
+      bestOverlap = overlap
+    }
+  }
+  return best
+}
+
+/** 뿌리에서 잎까지 거쳐 가는 split과 그 안의 자리 */
+function pathTo(root: PaneNode, paneId: string): Array<{ split: Extract<PaneNode, { kind: 'split' }>; index: number }> | null {
+  if (root.kind === 'leaf') return root.id === paneId ? [] : null
+  for (let i = 0; i < root.children.length; i++) {
+    const rest = pathTo(root.children[i], paneId)
+    if (rest) return [{ split: root, index: i }, ...rest]
+  }
+  return null
+}
+
+/**
+ * 키보드로 경계를 옮긴다 (P30-3).
+ *
+ * 화살표 쪽의 경계를 화살표 방향으로 민다 — 그쪽에 이웃이 있으면 pane이 커진다.
+ * 그쪽 끝에 붙어 있어 경계가 없으면 반대쪽 경계를 같은 방향으로 민다(pane이
+ * 작아진다). 어느 쪽이든 경계는 누른 화살표를 따라 움직이므로 손이 헷갈리지
+ * 않는다. Windows Terminal의 `Alt+Shift+화살표`와 같다.
+ *
+ * 가장 안쪽의 같은 방향 분할부터 본다 — 바로 옆 경계가 손에 잡히는 경계다.
+ */
+export function resizeToward(
+  root: PaneNode,
+  paneId: string,
+  direction: PaneDirection,
+  step = 0.05,
+  /** 분할마다 지킬 최소 비율. 화면 크기를 아는 호출자가 120px를 환산해 준다(P17-5) */
+  minRatio: number | ((splitId: string, direction: 'row' | 'column') => number) = 0.08
+): PaneNode {
+  const minOf = (split: Extract<PaneNode, { kind: 'split' }>): number =>
+    typeof minRatio === 'function' ? minRatio(split.id, split.direction) : minRatio
+  const path = pathTo(root, paneId)
+  if (!path) return root
+  const axis = direction === 'left' || direction === 'right' ? 'row' : 'column'
+  const forward = direction === 'right' || direction === 'down'
+  const delta = forward ? step : -step
+  const candidates = path.filter((p) => p.split.direction === axis).reverse()
+
+  for (const { split, index } of candidates) {
+    const divider = forward ? index : index - 1
+    if (divider >= 0 && divider < split.children.length - 1) {
+      return resizeSplit(root, split.id, divider, delta, minOf(split))
+    }
+  }
+  for (const { split, index } of candidates) {
+    const divider = forward ? index - 1 : index
+    if (divider >= 0 && divider < split.children.length - 1) {
+      return resizeSplit(root, split.id, divider, delta, minOf(split))
+    }
+  }
+  return root
+}
+
+/**
+ * 모든 분할을 고르게 (P30-5).
+ *
+ * tmux의 `select-layout even-*`에 해당한다. 끌어서 맞추다 엉킨 비율을 한 번에
+ * 되돌린다. 같은 분할 안의 칸끼리만 고르게 한다 — 트리 모양은 그대로다.
+ */
+export function equalizeSplits(root: PaneNode): PaneNode {
+  if (root.kind === 'leaf') return root
+  return {
+    ...root,
+    children: root.children.map(equalizeSplits),
+    sizes: root.children.map(() => 1 / root.children.length)
+  }
+}
+
+/**
+ * pane 하나를 트리에서 빼낸다 — 세션은 죽이지 않는다 (P30-6).
+ *
+ * tmux의 `break-pane`. 빠져나간 잎은 탭까지 그대로 들고 새 워크스페이스가 된다.
+ *
+ * @returns 남은 트리(마지막 잎이었으면 null)와 빼낸 잎. 대상이 없으면 null
+ */
+export function extractPane(
+  root: PaneNode,
+  paneId: string
+): { rest: PaneNode | null; leaf: Extract<PaneNode, { kind: 'leaf' }> } | null {
+  const leaf = findLeaf(root, paneId)
+  if (!leaf || leaf.kind !== 'leaf') return null
+  return { rest: closePane(root, paneId), leaf }
+}

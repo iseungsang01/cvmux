@@ -15,7 +15,8 @@ import {
   type SessionMeta,
   type SessionSnapshot,
   type UpdateState,
-  type WorkspaceMeta
+  type WorkspaceMeta,
+  type WorktreeResult
 } from '@shared/types'
 
 /**
@@ -67,6 +68,10 @@ const api: CvmuxApi = {
   updateState: () => ipcRenderer.invoke(IPC.UPDATE_STATE) as Promise<UpdateState>,
   updateCheck: () => ipcRenderer.invoke(IPC.UPDATE_CHECK) as Promise<UpdateState>,
   updateInstall: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL) as Promise<boolean>,
+  worktreeCreate: (cwd, branch, base) =>
+    ipcRenderer.invoke(IPC.WORKTREE_CREATE, cwd, branch, base) as Promise<WorktreeResult>,
+  worktreeRemove: (cwd, sessionIds, confirm) =>
+    ipcRenderer.invoke(IPC.WORKTREE_REMOVE, cwd, sessionIds, confirm) as Promise<WorktreeResult>,
   workspaceMeta: () =>
     ipcRenderer.invoke(IPC.WORKSPACE_META) as Promise<Record<string, WorkspaceMeta>>,
   todoAdd: (workspaceId, text) =>

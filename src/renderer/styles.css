@@ -278,6 +278,13 @@ kbd {
   opacity: 0;
 }
 
+/* 동시 입력 중인 워크스페이스. 보라는 동시 입력에만 쓴다 (P30-7) */
+.session-sync {
+  flex-shrink: 0;
+  color: #bb9af7;
+  font-size: 11px;
+}
+
 /* pane이 여럿인 워크스페이스 표시. P17 */
 .session-panes {
   flex-shrink: 0;
@@ -363,11 +370,9 @@ kbd {
   color: #d9a84e;
 }
 
-.fact-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentcolor;
+.fact-changes {
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
 }
 
 .fact-op {
@@ -943,6 +948,48 @@ kbd {
   pointer-events: none;
 }
 
+/*
+ * 동시 입력 (P30-7) — 친 키가 이 pane에도 간다.
+ *
+ * 신호등의 세 색(초록·노랑·빨강)은 "지금 나를 필요로 하는가"에만 답해야 하므로
+ * 보라를 쓴다. 테두리는 동시 입력을 받는 pane 전부에 두른다.
+ */
+.pane.is-sync,
+.split .pane.is-sync {
+  box-shadow: inset 0 0 0 1px #bb9af7;
+}
+
+/* 확대 중 가린 칸 (P30-4). DOM은 남겨 터미널을 다시 붙이지 않는다 */
+.split-slot.is-zoom-hidden {
+  display: none;
+}
+
+/* 확대·동시 입력 표시. 글자를 가리지 않게 작고, 누를 수 없다 */
+.pane-badges {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.pane-badge {
+  padding: 1px 6px;
+  border: 1px solid #33425c;
+  border-radius: 4px;
+  background: rgb(13 16 22 / 85%);
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.pane-badge.is-sync {
+  border-color: #bb9af7;
+  color: #bb9af7;
+}
+
 .pane-terminal {
   width: 100%;
   height: 100%;
@@ -1406,6 +1453,8 @@ kbd {
 /* ── pane 안의 가로 탭 (P24) ──────────────────────────────── */
 
 .pane-stack {
+  /* 확대·동시 입력 표시가 이 안에 뜬다 (P30) */
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -1888,6 +1937,14 @@ kbd {
   border-radius: 10px;
   background: var(--bg-sidebar);
   box-shadow: 0 20px 48px rgb(0 0 0 / 60%);
+}
+
+/* 값을 더 묻는 명령의 이름 — 무엇을 적는 칸인지 (P31-1) */
+.palette-asking {
+  flex: none;
+  padding: 10px 14px 0;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 
 .palette-input {

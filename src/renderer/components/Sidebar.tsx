@@ -302,6 +302,12 @@ function WorkspaceRow({
               </span>
             )}
             {panes > 1 && <span className="session-panes">⊞{panes}</span>}
+            {/* 동시 입력은 다른 워크스페이스에서 보고 있어도 보여야 한다 — 돌아와 친 키가 모두에 간다 (P30-7) */}
+            {workspace.syncInput && (
+              <span className="session-sync" title="동시 입력 중 — 친 키가 보이는 pane 모두에 갑니다">
+                ⇶
+              </span>
+            )}
             {workspace.autostart && (
               <span className="session-pin" aria-label="앱을 켤 때 함께 켬">
                 📌
@@ -533,11 +539,16 @@ function SessionFacts({ session }: { session: SessionMeta }): JSX.Element | null
 
       {git && (
         <span className={`fact fact-git${git.dirty ? ' is-dirty' : ''}`} title={gitTooltip(git)}>
-          {/* 브랜치는 ⎇, detached HEAD는 커밋을 가리키므로 ◉ */}
-          <span className="fact-icon">{git.detached ? '◉' : '⎇'}</span>
+          {/* 브랜치는 ⎇, detached HEAD는 커밋을 가리키므로 ◉. 작업 트리는 ⑂로 본 저장소와 가른다 (P31) */}
+          <span className="fact-icon">{git.detached ? '◉' : git.worktree ? '⑂' : '⎇'}</span>
           <span className="fact-branch">{git.branch}</span>
           {git.operation !== null && <span className="fact-op">{git.operation}</span>}
-          {git.dirty && <span className="fact-dot" aria-label="변경사항 있음" />}
+          {/* 점 대신 수 — "얼마나 고쳤나"가 볼 차례를 정한다 (P13-14) */}
+          {git.changes > 0 && (
+            <span className="fact-changes" aria-label={`바뀐 파일 ${git.changes}개`}>
+              ●{git.changes}
+            </span>
+          )}
           {git.ahead > 0 && <span className="fact-ab">↑{git.ahead}</span>}
           {git.behind > 0 && <span className="fact-ab">↓{git.behind}</span>}
         </span>

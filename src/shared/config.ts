@@ -20,6 +20,12 @@ export interface TerminalConfig {
   shell: string | null
   /** 앱을 다시 켤 때 에이전트 세션을 이어서 띄울 것인가. P22-8 */
   autoResumeAgentSessions: boolean
+  /**
+   * 이보다 오래 걸린 명령이 끝나면 알린다(초). 0이면 끈다. P32-1
+   *
+   * 셸 통합(OSC 133)이 명령의 시작과 끝을 알려 주는 셸에서만 동작한다.
+   */
+  notifyCommandSeconds: number
 }
 
 export interface SidebarConfig {
@@ -65,6 +71,22 @@ export interface RelayConfig {
   maxAutoTurns: number
 }
 
+/**
+ * 팔레트에 올리는 사용자 명령 (P33).
+ *
+ * cmux의 `cmux.json` `commands`와 같은 자리다. 자주 치는 명령줄에 이름을 붙여
+ * 팔레트에서 고른다 — 앱이 하는 일은 그 줄을 셸에 쳐 주는 것뿐이다.
+ */
+export interface CustomCommand {
+  name: string
+  command: string
+  /** 어디서 돌리나 — 지금 pane(기본), 이 pane의 새 탭, 새 워크스페이스 */
+  target: 'current' | 'tab' | 'workspace'
+}
+
+/** 사용자 명령 상한 — 팔레트가 감당할 만큼 */
+export const MAX_CUSTOM_COMMANDS = 50
+
 export interface CvmuxConfig {
   terminal: TerminalConfig
   update: UpdateConfig
@@ -72,6 +94,7 @@ export interface CvmuxConfig {
   sidebar: SidebarConfig
   theme: ThemeConfig
   keybindings: KeybindingConfig
+  commands: CustomCommand[]
 }
 
 /**
@@ -103,6 +126,28 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   'surface.previous': 'Ctrl+Shift+Tab',
   'pane.split.right': 'Alt+Shift+Equal',
   'pane.split.down': 'Alt+Shift+Minus',
+  /*
+   * 키보드로 pane 다루기 (P30).
+   *
+   * Windows Terminal과 같은 자리다 — `Alt+화살표` 이동, `Alt+Shift+화살표` 크기.
+   * 그 방향에 pane이 없으면 키를 셸로 흘려보낸다(P30-2). 확대는 Ghostty·cmux의
+   * `Shift+Enter` 계열을 따른다 — 셸과 에이전트 CLI는 `Ctrl+Shift+Enter`를 쓰지 않는다.
+   */
+  'pane.focus.left': 'Alt+Left',
+  'pane.focus.right': 'Alt+Right',
+  'pane.focus.up': 'Alt+Up',
+  'pane.focus.down': 'Alt+Down',
+  'pane.resize.left': 'Alt+Shift+Left',
+  'pane.resize.right': 'Alt+Shift+Right',
+  'pane.resize.up': 'Alt+Shift+Up',
+  'pane.resize.down': 'Alt+Shift+Down',
+  'pane.zoom': 'Ctrl+Shift+Enter',
+  // 기본 조합이 없는 동작 — 팔레트로 쓰고, 원하면 설정에서 키를 단다
+  'pane.equalize': '',
+  'pane.break': '',
+  'pane.sync': '',
+  /* 바로 전에 보던 워크스페이스로 (tmux의 `last-window`). P30-8 */
+  'workspace.last': 'Ctrl+Alt+Backquote',
   'view.sidebar': 'Ctrl+Shift+B',
   'view.right-sidebar': 'Alt+Shift+B',
   'view.palette': 'Ctrl+Shift+P',
@@ -152,13 +197,15 @@ export const DEFAULT_CONFIG: CvmuxConfig = {
     cursorBlink: true,
     scrollback: 10_000,
     shell: null,
-    autoResumeAgentSessions: true
+    autoResumeAgentSessions: true,
+    notifyCommandSeconds: 30
   },
   sidebar: { width: 264, fontSize: 13 },
   update: { enabled: true },
   relay: { maxAutoTurns: 10 },
   theme: DEFAULT_THEME,
-  keybindings: DEFAULT_KEYBINDINGS
+  keybindings: DEFAULT_KEYBINDINGS,
+  commands: []
 }
 
 /** 설정 파일을 읽다 만난 문제. 무엇을 무시했는지 사람에게 말해 준다. P22-3 */
@@ -186,7 +233,8 @@ export function parseConfig(raw: unknown): ParsedConfig {
     update: { ...DEFAULT_CONFIG.update },
     relay: { ...DEFAULT_CONFIG.relay },
     theme: { ...DEFAULT_THEME },
-    keybindings: { ...DEFAULT_KEYBINDINGS }
+    keybindings: { ...DEFAULT_KEYBINDINGS },
+    commands: []
   }
 
   if (raw === null || raw === undefined) return { config, problems }
@@ -198,7 +246,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
   const root = raw as Record<string, unknown>
 
   for (const key of Object.keys(root)) {
-    if (!['terminal', 'sidebar', 'theme', 'keybindings', 'update', 'relay'].includes(key)) {
+    if (!['terminal', 'sidebar', 'theme', 'keybindings', 'update', 'relay', 'commands'].includes(key)) {
       problems.push({ path: key, message: '모르는 항목입니다' })
     }
   }
@@ -242,6 +290,9 @@ export function parseConfig(raw: unknown): ParsedConfig {
     )
     str(terminal, 'shell', 'terminal.shell', problems, (v) => {
       config.terminal.shell = v
+    })
+    num(terminal, 'notifyCommandSeconds', 'terminal.notifyCommandSeconds', 0, 86_400, problems, (v) => {
+      config.terminal.notifyCommandSeconds = Math.floor(v)
     })
   }
 
@@ -303,6 +354,49 @@ export function parseConfig(raw: unknown): ParsedConfig {
       }
       // 빈 문자열은 "이 동작의 단축키를 없앤다"는 뜻이다
       config.keybindings[action] = value
+    }
+  }
+
+  // ── commands (P33)
+  if (root.commands !== undefined) {
+    if (!Array.isArray(root.commands)) {
+      problems.push({ path: 'commands', message: '목록이어야 합니다' })
+    } else {
+      root.commands.forEach((item: unknown, i) => {
+        const path = `commands[${i}]`
+        if (i >= MAX_CUSTOM_COMMANDS) {
+          if (i === MAX_CUSTOM_COMMANDS) {
+            problems.push({ path, message: `${MAX_CUSTOM_COMMANDS}개까지만 읽습니다` })
+          }
+          return
+        }
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+          problems.push({ path, message: '{ "name": …, "command": … } 모양이어야 합니다' })
+          return
+        }
+        const entry = item as Record<string, unknown>
+        for (const key of Object.keys(entry)) {
+          if (!['name', 'command', 'target'].includes(key)) {
+            problems.push({ path: `${path}.${key}`, message: '모르는 항목입니다' })
+          }
+        }
+        const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+        const command = typeof entry.command === 'string' ? entry.command.trim() : ''
+        if (!name || !command) {
+          // 이름이나 명령줄이 없는 항목은 고를 수 없거나 고르면 아무 일도 없다 — 통째로 뺀다
+          problems.push({ path, message: 'name과 command는 비어 있지 않은 문자열이어야 합니다' })
+          return
+        }
+        let target: CustomCommand['target'] = 'current'
+        if (entry.target !== undefined) {
+          if (entry.target === 'current' || entry.target === 'tab' || entry.target === 'workspace') {
+            target = entry.target
+          } else {
+            problems.push({ path: `${path}.target`, message: 'current / tab / workspace 중 하나여야 합니다' })
+          }
+        }
+        config.commands.push({ name, command, target })
+      })
     }
   }
 

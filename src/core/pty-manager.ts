@@ -16,7 +16,7 @@ import type {
   SessionSnapshot
 } from '@shared/types'
 import { ProbeScheduler, gitInfoEqual, portsEqual, shellsEqual } from './probe-scheduler'
-import { SessionState } from './session-state'
+import { SessionState, commandDoneText, type CommandDone } from './session-state'
 import type { CvmuxConfig } from '@shared/config'
 import { resumeCommand } from './agent-sessions'
 import type { PersistedSession } from './store'
@@ -75,6 +75,12 @@ function psBootstrap(resume: string | null): string {
  * 프롬프트를 그린 뒤 커서 위치로 폭을 재므로, 폭이 0인 OSC는 계산을 어긋내지
  * 않는다 — VS Code와 Windows Terminal이 쓰는 방식이다.
  *
+ * 직전 명령의 성패는 `$?`를 맨 먼저 읽어 둔다(P32-1). 읽는 것 자체가 `$?`를 덮으므로,
+ * 실패였으면 아무 데도 남지 않는 오류(`-ErrorAction Ignore`)를 하나 내어 원본 prompt가
+ * 보기 전에 `$?`를 되돌린다 — VS Code의 셸 통합과 같은 방법이다. 명령줄은 읽는 순간
+ * 633;E로 함께 보낸다. 제어문자는 공백으로 바꾸고 200자에서 자른다 — OSC를 중간에
+ * 끊거나 파서의 상한(P8-2)을 넘지 않게.
+ *
  * `PSConsoleHostReadLine` 훅을 prompt 안에서 거는 이유도 순서 때문이다. PSReadLine은
  * 대화형 REPL이 시작될 때 로드되는데, 이 스크립트는 `-EncodedCommand`로 그보다
  * **먼저** 실행된다. 바깥에서 한 번만 확인하면 함수가 아직 없어 훅을 놓치고,
@@ -86,13 +92,17 @@ if (-not $global:__cvmuxShellIntegration) {
   $global:__cvmuxShellIntegration = $true
   $global:__cvmuxPrompt = $function:prompt
   function global:prompt {
+    $fail = [int]!$global:?
+    if ($fail) { Write-Error 'cvmux' -ErrorAction Ignore }
     $body = (& $global:__cvmuxPrompt) -join ''
     if (-not $global:__cvmuxReadLineHooked -and (Test-Path Function:\\PSConsoleHostReadLine)) {
       $global:__cvmuxReadLineHooked = $true
       $global:__cvmuxReadLine = $function:PSConsoleHostReadLine
       function global:PSConsoleHostReadLine {
         $line = & $global:__cvmuxReadLine
-        [Console]::Write("$([char]27)]133;C$([char]7)")
+        $cmd = ($line -replace '[\\x00-\\x1f\\x7f]', ' ').Trim()
+        if ($cmd.Length -gt 200) { $cmd = $cmd.Substring(0, 200) }
+        [Console]::Write("$([char]27)]633;E;$cmd$([char]7)$([char]27)]133;C$([char]7)")
         $line
       }
     }
@@ -104,7 +114,7 @@ if (-not $global:__cvmuxShellIntegration) {
       $p = $loc.ProviderPath -replace '\\\\', '/' -replace '#', '%23' -replace '\\?', '%3F'
       $cwd = "$e]7;file:///$p$b"
     }
-    "$e]133;D$b$e]133;A$b$cwd$body$e]133;B$b"
+    "$e]133;D;$fail$b$e]133;A$b$cwd$body$e]133;B$b"
   }
 }
 `.trim()
@@ -257,6 +267,8 @@ class Session {
       cwdChanged(previousCwd: string): void
       /** 칩을 띄워 둔 채 명령이 끝났다 — 프로세스 트리를 다시 봐야 한다. P14-14 */
       commandDone(): void
+      /** 셸이 명령 하나를 끝냈다 — 오래 걸렸으면 알린다. P32-1 */
+      commandFinished(id: string, done: CommandDone): void
     }
   ) {
     const resolved = resolveCwd(options.cwd, defaultCwd)
@@ -279,7 +291,7 @@ class Session {
         this.emit.cwdChanged(previous)
         this.emit.meta(this.id)
       },
-      onCommandDone: () => {
+      onCommandDone: (done) => {
         /*
          * 명령이 끝났으면 그 아래서 돌던 셸도 끝났다 (P14-14).
          *
@@ -288,6 +300,7 @@ class Session {
          * 명령마다 프로세스 트리를 뜰 이유는 없다.
          */
         if (this.shells.length > 0) this.emit.commandDone()
+        this.emit.commandFinished(this.id, done)
       }
     })
   }
@@ -615,6 +628,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   private defaultShell: string | undefined
   /** 복원할 때 에이전트를 이어서 띄울 것인가. P22-8 */
   private autoResume = true
+  /** 이보다 오래 걸린 명령이 끝나면 알린다. 0이면 끈다. P32-1 */
+  private notifyCommandMs = 30_000
 
   /**
    * 옆 pane의 에이전트에게 답 넘기기 (P29).
@@ -669,7 +684,22 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
   setDefaults(config: CvmuxConfig): void {
     this.defaultShell = config.terminal.shell ?? undefined
     this.autoResume = config.terminal.autoResumeAgentSessions
+    this.notifyCommandMs = config.terminal.notifyCommandSeconds * 1000
     this.relay.setMaxAutoTurns(config.relay.maxAutoTurns)
+  }
+
+  /**
+   * 오래 걸린 명령이 끝났다 (P32-1).
+   *
+   * tmux의 `monitor-silence`가 답하던 질문 — "빌드 끝났나?" — 에 셸이 직접 한 말로
+   * 답한다. 출력이 멎은 것(추측)이 아니라 프롬프트가 돌아온 것(확실)이 근거다.
+   * 알림의 나머지 길(보고 있으면 토스트를 띄우지 않는다, 알림함에 남는다)은
+   * 에이전트 알림과 같다.
+   */
+  private commandFinished(id: string, done: CommandDone): void {
+    if (this.notifyCommandMs <= 0) return
+    if (done.durationMs === null || done.durationMs < this.notifyCommandMs) return
+    this.notify(id, commandDoneText(done))
   }
 
   /** git·포트 정보를 주기적으로 채운다. P13 / P14 */
@@ -736,7 +766,8 @@ export class PtyManager extends EventEmitter<PtyManagerEvents> {
         exit: (info) => this.emit('exit', info),
         notify: (id, text) => this.emit('notify', id, text),
         cwdChanged: (previousCwd) => this.probes.invalidateCwd(previousCwd),
-        commandDone: () => this.probes.refreshTree()
+        commandDone: () => this.probes.refreshTree(),
+        commandFinished: (id, done) => this.commandFinished(id, done)
       }
     )
 

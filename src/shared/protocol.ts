@@ -20,6 +20,22 @@ export const CONTROL_EVENT_BUFFER = 4096
 /** 렌더러가 답해야 하는 요청의 제한 시간. 창이 없거나 멈췄으면 여기서 끊는다. P20-8 */
 export const CONTROL_BRIDGE_TIMEOUT_MS = 5000
 
+/**
+ * git을 여러 번 부르는 요청의 제한 시간 (P31-4).
+ *
+ * 작업 트리를 만들면 저장소만큼 체크아웃하고, 지우면 닫은 셸이 폴더를 놓기를
+ * 기다린다. 5초 안에 끝난다는 보장이 없다 — 끊으면 일은 뒤에서 마저 끝나는데
+ * 스크립트는 실패했다고 믿는다. git 자체의 제한(체크아웃 120초)보다 길게 둔다.
+ */
+export const CONTROL_GIT_TIMEOUT_MS = 180_000
+
+/** 이 요청을 렌더러에게 얼마나 기다려 줄지 */
+export function bridgeTimeoutFor(method: string, params: Record<string, unknown>): number {
+  if (method === M.WORKTREE_REMOVE) return CONTROL_GIT_TIMEOUT_MS
+  if (method === M.WORKSPACE_CREATE && params.worktree !== undefined) return CONTROL_GIT_TIMEOUT_MS
+  return CONTROL_BRIDGE_TIMEOUT_MS
+}
+
 export type ControlErrorCode =
   /** 비밀번호가 없거나 틀렸다 */
   | 'unauthorized'
@@ -178,6 +194,15 @@ export const M = {
   PANE_SPLIT: 'pane.split',
   PANE_FOCUS: 'pane.focus',
   PANE_CLOSE: 'pane.close',
+  /** 키보드로 pane 다루기 (P30). 이름은 tmux의 `resize-pane`·`break-pane`을 따른다 */
+  PANE_ZOOM: 'pane.zoom',
+  PANE_RESIZE: 'pane.resize',
+  PANE_EQUALIZE: 'pane.equalize',
+  PANE_BREAK: 'pane.break',
+  /** 보이는 pane 모두에 동시 입력 (P30-7). tmux의 `synchronize-panes` */
+  WORKSPACE_SYNC: 'workspace.sync',
+  /** 작업 트리를 지우고 그 워크스페이스를 닫는다 (P31-3). 만들기는 `workspace.create --worktree` */
+  WORKTREE_REMOVE: 'worktree.remove',
 
   NOTIFICATION_LIST: 'notification.list',
   NOTIFICATION_MARK_READ: 'notification.mark-read',
@@ -280,6 +305,12 @@ export const RENDERER_METHODS: ReadonlySet<string> = new Set<string>([
   M.PANE_SPLIT,
   M.PANE_FOCUS,
   M.PANE_CLOSE,
+  M.PANE_ZOOM,
+  M.PANE_RESIZE,
+  M.PANE_EQUALIZE,
+  M.PANE_BREAK,
+  M.WORKSPACE_SYNC,
+  M.WORKTREE_REMOVE,
   /*
    * 알림함 자체는 main이 들고 있다(P21). 여는 것만 렌더러 몫이다 —
    * 그 세션이 어느 워크스페이스에 있는지는 렌더러만 안다.

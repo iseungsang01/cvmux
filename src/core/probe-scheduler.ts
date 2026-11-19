@@ -262,6 +262,8 @@ export function gitInfoEqual(a: GitInfo | null, b: GitInfo | null): boolean {
     a.branch === b.branch &&
     a.detached === b.detached &&
     a.dirty === b.dirty &&
+    a.changes === b.changes &&
+    a.worktree === b.worktree &&
     a.ahead === b.ahead &&
     a.behind === b.behind &&
     a.operation === b.operation

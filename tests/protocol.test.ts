@@ -11,7 +11,7 @@
  *
  * 실행: npm test
  */
-import { resolveHandle } from '../src/shared/protocol'
+import { M, bridgeTimeoutFor, resolveHandle } from '../src/shared/protocol'
 import { keySequence } from '../src/main/control-socket'
 
 const results: string[] = []
@@ -75,6 +75,11 @@ function main(): void {
   check('한 글자는 그대로', keySequence('a') === 'a')
   check('한글 한 글자도 그대로', keySequence('가') === '가')
   check('모르는 이름은 null', keySequence('Frobnicate') === null)
+
+  // P31-4: git을 여러 번 부르는 요청만 오래 기다린다
+  check('P31-4 보통은 5초', bridgeTimeoutFor(M.WORKSPACE_CREATE, {}) === 5000)
+  check('P31-4 worktree 만들기는 길게', bridgeTimeoutFor(M.WORKSPACE_CREATE, { worktree: 'x' }) > 60_000)
+  check('P31-4 worktree 지우기도', bridgeTimeoutFor(M.WORKTREE_REMOVE, {}) > 60_000)
 
   console.log(results.join('\n'))
   console.log(`\n${results.length - failed}/${results.length} passed`)

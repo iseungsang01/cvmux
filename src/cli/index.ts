@@ -48,7 +48,9 @@ const SWITCHES: ReadonlySet<string> = new Set([
   'all',
   'unread',
   'close',
-  'stop'
+  'stop',
+  // remove-worktree --confirm (P31-3)
+  'confirm'
 ])
 
 function parse(argv: string[]): Parsed {
@@ -423,8 +425,18 @@ async function run(
     case 'new-workspace':
       return client.call(M.WORKSPACE_CREATE, {
         cwd: str(flags, 'cwd') ?? args[0],
-        title: str(flags, 'title')
+        title: str(flags, 'title'),
+        // P31-1
+        worktree: str(flags, 'worktree'),
+        base: str(flags, 'base')
       })
+    case 'remove-worktree':
+      return client.call(M.WORKTREE_REMOVE, {
+        workspace: args[0] ?? workspace,
+        confirm: flags.has('confirm')
+      })
+    case 'sync-panes':
+      return client.call(M.WORKSPACE_SYNC, { workspace, state: args[0] })
 
     case 'select-workspace':
       return client.call(M.WORKSPACE_SELECT, { workspace: args[0] ?? workspace })
@@ -465,7 +477,25 @@ async function run(
       return client.call(M.SURFACE_CLOSE, { workspace, pane, surface: args[0] ?? str(flags, 'surface') })
 
     case 'focus-pane':
-      return client.call(M.PANE_FOCUS, { workspace, pane: args[0] ?? pane })
+      return client.call(M.PANE_FOCUS, {
+        workspace,
+        pane: args[0] ?? pane,
+        direction: str(flags, 'direction')
+      })
+    // ── 키보드로 pane 다루기 (P30) ──────────────────────────────
+    case 'zoom-pane':
+      return client.call(M.PANE_ZOOM, { workspace, state: args[0] })
+    case 'resize-pane':
+      return client.call(M.PANE_RESIZE, {
+        workspace,
+        pane,
+        direction: str(flags, 'direction') ?? args[0],
+        amount: str(flags, 'amount') ?? args[1]
+      })
+    case 'equalize-panes':
+      return client.call(M.PANE_EQUALIZE, { workspace })
+    case 'break-pane':
+      return client.call(M.PANE_BREAK, { workspace, pane: args[0] ?? pane })
     case 'close-pane':
       return client.call(M.PANE_CLOSE, { workspace, pane: args[0] ?? pane })
 

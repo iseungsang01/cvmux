@@ -14,7 +14,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Relay, isHumanInput, type RelayHost } from '../src/core/relay'
+import { Relay, type RelayHost } from '../src/core/relay'
+import { isBroadcastInput, isHumanInput } from '../src/shared/input'
 import { PtyManager } from '../src/core/pty-manager'
 import { SessionStore } from '../src/core/store'
 import type { SessionStatus } from '../src/shared/types'
@@ -252,6 +253,14 @@ async function main(): Promise<void> {
   check('방향키도 사람 입력', isHumanInput('\x1b[A'))
   check('포커스 보고는 아니다', !isHumanInput('\x1b[I') && !isHumanInput('\x1b[O'))
   check('장치 속성 응답은 아니다', !isHumanInput('\x1b[?1;2c'))
+
+  // ── 동시 입력으로 나눠 줄 키 (P30-7) ─────────────────────────
+  check('P30-7 글자는 나눠 준다', isBroadcastInput('ls\r'))
+  check('P30-7 방향키도 나눠 준다', isBroadcastInput('\x1b[A'))
+  check('P30-7 SGR 마우스 보고는 그 pane의 것', !isBroadcastInput('\x1b[<0;12;5M\x1b[<0;12;5m'))
+  check('P30-7 X10 마우스 보고도', !isBroadcastInput('\x1b[M !!'))
+  check('P30-7 포커스 보고도', !isBroadcastInput('\x1b[I'))
+  check('P30-7 마우스는 사람 입력이긴 하다', isHumanInput('\x1b[<0;12;5M'))
 
   // ── 저장과 복원 (P29-7) ──────────────────────────────────────
   {

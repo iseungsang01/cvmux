@@ -7,15 +7,17 @@ import type { WindowRegistry } from './windows'
 import type { PtyManager } from '@core/pty-manager'
 import type { ConfigStore } from '@core/config-store'
 import { POLICY } from '@shared/policy'
-import { CONTROL_BRIDGE_TIMEOUT_MS } from '@shared/protocol'
+import { bridgeTimeoutFor } from '@shared/protocol'
 import {
   IPC,
   type BrowserAction,
   type BrowserRect,
   type CreateSessionOptions,
   type TodoItem,
-  type Workspace
+  type Workspace,
+  type WorktreeResult
 } from '@shared/types'
+import { createWorktree, inspectWorktree, removeWorktree } from '@core/worktree'
 import type { BrowserManager } from './browser'
 import { BridgeError, type ControlBridge } from './control-socket'
 import type { Notifier } from './notifier'
@@ -64,7 +66,7 @@ class RendererBridge implements ControlBridge {
       const timer = setTimeout(() => {
         this.waiting.delete(id)
         reject(new Error('렌더러가 응답하지 않습니다'))
-      }, CONTROL_BRIDGE_TIMEOUT_MS)
+      }, bridgeTimeoutFor(method, params))
       this.waiting.set(id, { resolve, reject, timer })
       win.webContents.send(IPC.EVT_CTL_REQUEST, { id, method, params })
     })
@@ -453,6 +455,57 @@ export function registerIpc(
     clipboard.writeText(text)
     return true
   })
+
+  // ── 작업마다 worktree 하나 (P31) ─────────────────────────────
+  ipcMain.handle(IPC.WORKTREE_CREATE, (_event, cwd: unknown, branch: unknown, base: unknown) => {
+    if (typeof cwd !== 'string' || typeof branch !== 'string') {
+      return { ok: false, message: '저장소 자리와 브랜치 이름이 필요합니다' }
+    }
+    return createWorktree(cwd, branch, typeof base === 'string' && base !== '' ? base : undefined)
+  })
+
+  /*
+   * 작업 트리 지우기 (P31-3).
+   *
+   * 지울 수 있는지 **먼저** 본다 — 셸을 다 닫은 뒤에 "변경이 있어 못 지운다"고 하면
+   * 사람은 일하던 자리만 잃는다. 화면에서 부르면 무엇이 사라지는지 보여 주고 묻는다.
+   * 소켓에서 부르면 묻지 않는다 — 스크립트는 이미 결정을 내렸다(P26-3과 같다).
+   */
+  ipcMain.handle(
+    IPC.WORKTREE_REMOVE,
+    async (event, cwd: unknown, sessionIds: unknown, confirm: unknown): Promise<WorktreeResult> => {
+      if (typeof cwd !== 'string') return { ok: false, message: '작업 트리 자리가 필요합니다' }
+      const ids = Array.isArray(sessionIds) ? sessionIds.filter((s): s is string => typeof s === 'string') : []
+
+      const inspected = await inspectWorktree(cwd)
+      if (!inspected.ok || !inspected.target) return { ok: false, message: inspected.message }
+      const target = inspected.target
+
+      if (confirm !== false) {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        const options = {
+          type: 'warning' as const,
+          buttons: ['지우기', '취소'],
+          defaultId: 1,
+          cancelId: 1,
+          title: 'cvmux',
+          message: '작업 트리를 지울까요?',
+          detail:
+            `${target.path}\n\n` +
+            `이 워크스페이스의 세션 ${ids.length}개를 닫고 폴더를 지웁니다. ` +
+            (target.branch
+              ? `브랜치 ${target.branch}는 합쳐졌으면 함께 지우고, 아니면 남깁니다.`
+              : '브랜치가 없는(detached) 작업 트리입니다.')
+        }
+        const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+        if (result.response !== 0) return { ok: false }
+      }
+
+      // 셸이 그 폴더를 쥐고 있으면 Windows는 지우지 못한다 — 먼저 닫는다
+      await Promise.all(ids.map((id) => manager.close(id)))
+      return removeWorktree(target)
+    }
+  )
 
   // 대용량 붙여넣기 확인. P7-3
   ipcMain.handle(IPC.CONFIRM_PASTE, async (event, bytes: unknown) => {

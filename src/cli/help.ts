@@ -48,6 +48,11 @@ export const HELP = `cvmux - 제어 소켓으로 cvmux를 조종한다
   current-workspace      지금 보고 있는 워크스페이스
   tree                   워크스페이스와 pane 배치 전체
   new-workspace [path]   새 워크스페이스 (--cwd, --title)
+                         --worktree <브랜치>면 그 이름의 git worktree를 저장소 옆
+                         <저장소>.worktrees에 만들고 거기서 연다 (--base <ref>)
+  remove-worktree [h]    worktree 워크스페이스의 세션을 닫고 폴더를 지운다.
+                         합쳐진 브랜치도 지운다. 변경이 있으면 거절 (--confirm이면 묻는다)
+  sync-panes [on|off]    보이는 pane 모두에 동시 입력 (생략하면 뒤집는다)
   select-workspace <h>   전환
   close-workspace [h]    닫기
   rename-workspace [h] <title>   이름 바꾸기
@@ -55,8 +60,12 @@ export const HELP = `cvmux - 제어 소켓으로 cvmux를 조종한다
 pane:
   list-panes             현재 워크스페이스의 pane 목록
   new-split [방향]       분할 (right|left|down|up, 기본 right)
-  focus-pane <h>         포커스 이동
+  focus-pane <h>         포커스 이동 (--direction left|right|up|down이면 그쪽 이웃으로)
   close-pane [h]         닫기
+  zoom-pane [on|off]     이 pane만 크게 (생략하면 뒤집는다)
+  resize-pane <방향>     경계를 그쪽으로 민다 (--amount 백분율, 기본 5)
+  equalize-panes         모든 분할을 고르게
+  break-pane [h]         pane을 새 워크스페이스로 떼어 낸다 (세션은 그대로)
 
 가로 탭 (pane 안):
   list-surfaces          탭 목록

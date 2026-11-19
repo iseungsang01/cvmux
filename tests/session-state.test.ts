@@ -9,7 +9,7 @@
  * 실행: npm test
  */
 import { POLICY } from '@shared/policy'
-import { SessionState } from '../src/core/session-state'
+import { SessionState, commandDoneText, formatElapsed, type CommandDone } from '../src/core/session-state'
 
 const results: string[] = []
 let failed = 0
@@ -21,15 +21,23 @@ function check(name: string, ok: boolean, detail = ''): void {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-function make(): { s: SessionState; notes: string[]; cwds: string[]; done: { count: number } } {
+function make(): {
+  s: SessionState
+  notes: string[]
+  cwds: string[]
+  done: { count: number; last: CommandDone | null }
+} {
   const notes: string[] = []
   const cwds: string[] = []
-  const done = { count: 0 }
+  const done: { count: number; last: CommandDone | null } = { count: 0, last: null }
   const s = new SessionState({
     onChange: () => {},
     onNotify: (t) => notes.push(t),
     onCwd: (cwd) => cwds.push(cwd),
-    onCommandDone: () => done.count++
+    onCommandDone: (info) => {
+      done.count++
+      done.last = info
+    }
   })
   return { s, notes, cwds, done }
 }
@@ -475,6 +483,46 @@ async function main(): Promise<void> {
     s.ingest('\x07')
     check('깨진 OSC carry 상한 동작 (크래시 없음)', true)
     s.dispose()
+  }
+
+  // ── P32-1: 명령의 시작·끝·성패·명령줄
+  {
+    const { s, done } = make()
+    // 첫 프롬프트의 133;D — 시작을 보지 못한 끝은 길이를 모른다
+    s.ingest('\x1b]133;D;0\x07\x1b]133;A\x07PS C:\\> \x1b]133;B\x07')
+    check('P32-1 첫 프롬프트는 길이가 없다', done.last !== null && done.last.durationMs === null)
+
+    s.ingest('\x1b]633;E;npm run build\x07\x1b]133;C\x07')
+    await sleep(30)
+    s.ingest('done\r\n\x1b]133;D;1\x07\x1b]133;A\x07PS C:\\> \x1b]133;B\x07')
+    const last = done.last as CommandDone | null
+    check('P32-1 길이를 잰다', last !== null && last.durationMs !== null && last.durationMs >= 25, String(last?.durationMs))
+    check('P32-1 종료 코드', last?.exitCode === 1, String(last?.exitCode))
+    check('P32-1 명령줄', last?.command === 'npm run build', String(last?.command))
+
+    // 셸 통합이 옛 모양(133;D)이어도 끝은 끝이다
+    s.ingest('\x1b]133;C\x07')
+    s.ingest('\x1b]133;D\x07')
+    const plain = done.last as CommandDone | null
+    check('P32-1 코드 없는 133;D', plain?.exitCode === null && plain?.command === null)
+    s.dispose()
+  }
+
+  {
+    check('P32-1 초', formatElapsed(42_000) === '42초')
+    check('P32-1 분 초', formatElapsed(133_000) === '2분 13초')
+    check('P32-1 딱 떨어지는 분', formatElapsed(120_000) === '2분')
+    check('P32-1 시간', formatElapsed(3_900_000) === '1시간 5분')
+    check(
+      'P32-1 성공 문구',
+      commandDoneText({ durationMs: 133_000, exitCode: 0, command: 'npm test' }) === 'npm test 끝남 · 2분 13초'
+    )
+    check(
+      'P32-1 실패 문구',
+      commandDoneText({ durationMs: 45_000, exitCode: 1, command: null }) === '명령 실패 · 45초'
+    )
+    const long = commandDoneText({ durationMs: 60_000, exitCode: 0, command: 'x'.repeat(100) })
+    check('P32-1 긴 명령줄은 자른다', long.startsWith(`${'x'.repeat(59)}…`), long)
   }
 
   console.log(results.join('\n'))

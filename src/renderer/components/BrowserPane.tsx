@@ -53,6 +53,11 @@ export function BrowserPane({
         return
       }
       const box = el.getBoundingClientRect()
+      // 감춰진 자리(확대로 가린 칸 — P30-4)는 크기가 0이다. 0×0으로 얹지 말고 떼어 낸다
+      if (box.width === 0 || box.height === 0) {
+        void window.cvmux.browserPlace(meta.id, null)
+        return
+      }
       void window.cvmux.browserPlace(meta.id, {
         x: box.x,
         y: box.y,

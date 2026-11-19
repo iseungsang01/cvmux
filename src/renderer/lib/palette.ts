@@ -20,7 +20,12 @@ export interface Command {
   section: string
   /** 지금 이 명령을 쓸 수 있는가. 쓸 수 없으면 목록에서 뺀다 */
   enabled?: boolean
-  run(): void
+  /**
+   * 고르면 한 줄을 더 묻는다 — 브랜치 이름처럼 명령에 넣을 값 (P31-1).
+   * 팔레트가 그 자리에서 입력창으로 바뀌고, Enter로 친 값이 `run`에 간다.
+   */
+  input?: { placeholder: string }
+  run(input?: string): void
 }
 
 export interface PaletteMatch {

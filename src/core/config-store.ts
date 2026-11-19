@@ -166,7 +166,10 @@ const TEMPLATE = `{
     // "shell": null,              // 비우면 pwsh → powershell → cmd 순으로 찾는다
 
     // 앱을 다시 켤 때 에이전트 세션을 이어서 띄울지. \`cvmux hooks setup\` 참고
-    // "autoResumeAgentSessions": true
+    // "autoResumeAgentSessions": true,
+
+    // 이보다 오래 걸린 명령(초)이 끝나면 알린다. 0이면 끈다
+    // "notifyCommandSeconds": 30
   },
 
   "sidebar": {
@@ -187,12 +190,20 @@ const TEMPLATE = `{
     // "blue": "#7aa2f7"
   },
 
+  // 팔레트(Ctrl+Shift+P)에 올릴 내 명령. target: current(지금 pane) · tab(새 탭) · workspace(새 워크스페이스)
+  "commands": [
+    // { "name": "테스트", "command": "npm test" },
+    // { "name": "개발 서버", "command": "npm run dev", "target": "tab" }
+  ],
+
   // 단축키. 빈 문자열이면 그 동작의 단축키를 없앤다.
   // 키 이름은 자판 위치(event.code)를 쓴다 — "N", "1", "F5", "Equal", "Minus".
   "keybindings": {
     // "workspace.new": "Ctrl+Shift+N",
     // "view.palette": "Ctrl+Shift+P",
-    // "find.session": "Alt+F"
+    // "find.session": "Alt+F",
+    // 기본 조합이 없는 것: pane.equalize(고르게) · pane.break(새 워크스페이스로) · pane.sync(동시 입력)
+    // "pane.sync": "Alt+Shift+S"
   }
 }
 `

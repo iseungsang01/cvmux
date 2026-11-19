@@ -20,6 +20,8 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
   const { commands, open, onClose } = props
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
+  /** 값을 더 묻는 중인 명령 (P31-1). 있으면 입력창이 그 값을 받는다 */
+  const [asking, setAsking] = useState<Command | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
 
@@ -30,6 +32,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
     if (!open) return
     setQuery('')
     setCursor(0)
+    setAsking(null)
     inputRef.current?.focus()
   }, [open])
 
@@ -50,6 +53,13 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
   const run = (index: number): void => {
     const match = matches[index]
     if (!match) return
+    // 값을 더 물어야 하는 명령이면 입력창을 그 값의 자리로 바꾼다
+    if (match.command.input) {
+      setAsking(match.command)
+      setQuery('')
+      inputRef.current?.focus()
+      return
+    }
     // 먼저 닫는다 — 명령이 포커스를 옮기는데 팔레트가 아직 떠 있으면 뺏어 온다
     onClose()
     match.command.run()
@@ -58,6 +68,22 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     // 한글 조합 중의 화살표·엔터는 IME의 것이다. P6-4
     if (event.nativeEvent.isComposing) return
+
+    if (asking) {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        const value = query.trim()
+        if (value === '') return
+        onClose()
+        asking.run(value)
+      } else if (event.key === 'Escape') {
+        // 한 걸음만 물러난다 — 목록으로 돌아가 다른 명령을 고를 수 있게
+        event.preventDefault()
+        setAsking(null)
+        setQuery('')
+      }
+      return
+    }
 
     switch (event.key) {
       case 'ArrowDown':
@@ -89,12 +115,13 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
         aria-label="명령 팔레트"
         onMouseDown={(event) => event.stopPropagation()}
       >
+        {asking && <div className="palette-asking">{asking.title}</div>}
         <input
           ref={inputRef}
           className="palette-input"
           type="text"
           value={query}
-          placeholder="명령 검색…"
+          placeholder={asking?.input?.placeholder ?? '명령 검색…'}
           spellCheck={false}
           onChange={(event) => {
             setQuery(event.target.value)
@@ -103,7 +130,9 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element | null {
           onKeyDown={onKeyDown}
         />
 
-        {matches.length === 0 ? (
+        {asking ? (
+          <div className="palette-empty">Enter로 실행 · Esc로 돌아가기</div>
+        ) : matches.length === 0 ? (
           <div className="palette-empty">맞는 명령이 없습니다.</div>
         ) : (
           <ul className="palette-list" ref={listRef}>

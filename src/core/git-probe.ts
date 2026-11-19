@@ -47,6 +47,16 @@ function detectOperation(gitDir: string): string | null {
   return null
 }
 
+/**
+ * `git worktree add`로 만든 작업 트리인가 (P31).
+ *
+ * 연결된 작업 트리의 git 디렉토리는 본 저장소의 `.git/worktrees/<이름>` 아래에
+ * 있다. 이미 받아 둔 경로만 보므로 git을 한 번 더 부르지 않는다.
+ */
+export function isLinkedWorktree(gitDir: string): boolean {
+  return /[\\/]\.git[\\/]worktrees[\\/][^\\/]+[\\/]?$/i.test(gitDir)
+}
+
 /** 저장소의 두 축 — 메타데이터가 있는 곳과 작업 트리의 뿌리 */
 interface RepoPaths {
   gitDir: string
@@ -93,7 +103,13 @@ export class GitProbe {
     // 타임아웃이나 실패 — 이전 결과를 유지하도록 null. P13-5
     if (output === null) return null
 
-    return parseStatus(output, detectOperation(repo.gitDir), repoName(repo), repo.root)
+    return parseStatus(
+      output,
+      detectOperation(repo.gitDir),
+      repoName(repo),
+      repo.root,
+      isLinkedWorktree(repo.gitDir)
+    )
   }
 
   private async resolveRepo(cwd: string): Promise<RepoPaths | null> {
@@ -151,18 +167,19 @@ function repoName(repo: RepoPaths): string {
 }
 
 /** `git status --porcelain=v2 --branch` 출력을 파싱한다 */
-function parseStatus(
+export function parseStatus(
   output: string,
   operation: string | null,
   repo: string,
-  root: string | null
+  root: string | null,
+  worktree = false
 ): GitInfo {
   let branch = ''
   let oid = ''
   let detached = false
   let ahead = 0
   let behind = 0
-  let dirty = false
+  let changes = 0
 
   for (const line of output.split('\n')) {
     if (line.startsWith('# branch.oid ')) {
@@ -178,8 +195,8 @@ function parseStatus(
         behind = Number.parseInt(ab[2], 10)
       }
     } else if (line.length > 0 && !line.startsWith('#')) {
-      // 1/2/u/? 로 시작하는 변경 항목이 하나라도 있으면 dirty
-      dirty = true
+      // 1/2/u/? 로 시작하는 줄 하나가 바뀐 파일 하나다. 무시한 파일(!)은 기본으로 나오지 않는다. P13-14
+      changes++
     }
   }
 
@@ -191,5 +208,16 @@ function parseStatus(
   }
 
   // git이 돌려주는 루트는 `C:/a/b` 형태다. cwd와 견주려면 같은 표기여야 한다
-  return { repo, root: root?.replace(/\//g, '\\') ?? null, branch, detached, dirty, ahead, behind, operation }
+  return {
+    repo,
+    root: root?.replace(/\//g, '\\') ?? null,
+    branch,
+    detached,
+    dirty: changes > 0,
+    changes,
+    worktree,
+    ahead,
+    behind,
+    operation
+  }
 }

@@ -8,6 +8,7 @@
  * 실행: npm test
  */
 import type { GitInfo, SessionMeta } from '../src/shared/types'
+import { isLinkedWorktree, parseStatus } from '../src/core/git-probe'
 import { repoRelativePath, shortenPath, statusLabel, whereLabel } from '../src/renderer/lib/format'
 
 const results: string[] = []
@@ -25,6 +26,8 @@ function git(overrides: Partial<GitInfo> = {}): GitInfo {
     branch: 'main',
     detached: false,
     dirty: false,
+    changes: 0,
+    worktree: false,
     ahead: 0,
     behind: 0,
     operation: null,
@@ -112,6 +115,34 @@ function main(): void {
     const idle = statusLabel(session('C:\\', null))
     const waiting = statusLabel({ ...session('C:\\', null), status: 'waiting' })
     check('idle과 waiting의 문구가 다르다', idle !== waiting, `${idle} / ${waiting}`)
+  }
+
+  // ── P13-14: 바뀐 파일 수는 이미 받는 출력에서 센다
+  {
+    const output = [
+      '# branch.oid 2b08c60aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '# branch.head main',
+      '# branch.upstream origin/main',
+      '# branch.ab +2 -1',
+      '1 .M N... 100644 100644 100644 aaa bbb src/a.ts',
+      '2 R. N... 100644 100644 100644 aaa bbb R100 src/b.ts\tsrc/old.ts',
+      '? notes.txt',
+      ''
+    ].join('\n')
+    const info = parseStatus(output, null, 'cvmux', 'C:/repo')
+    check('P13-14 바뀐 파일 3개', info.changes === 3, String(info.changes))
+    check('P13-14 바뀐 것이 있으면 dirty', info.dirty)
+    check('P13-14 ahead/behind는 그대로', info.ahead === 2 && info.behind === 1)
+    const clean = parseStatus('# branch.oid abc\n# branch.head main\n', null, 'cvmux', null)
+    check('P13-14 깨끗하면 0', clean.changes === 0 && !clean.dirty)
+  }
+
+  // ── P31: 연결된 작업 트리 알아보기
+  {
+    check('P31 본 저장소는 아니다', !isLinkedWorktree('C:/repo/.git'))
+    check('P31 worktree의 git 디렉토리', isLinkedWorktree('C:/repo/.git/worktrees/feat-x'))
+    check('P31 역슬래시도', isLinkedWorktree('C:\\repo\\.git\\worktrees\\feat-x\\'))
+    check('P31 이름이 worktrees인 폴더는 아니다', !isLinkedWorktree('C:/worktrees/repo/.git'))
   }
 
   console.log(results.join('\n'))

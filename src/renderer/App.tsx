@@ -21,19 +21,56 @@ import {
   addSurface,
   closeSurface as closeSurfaceInTree,
   collectAllSurfaces,
+  collectSessionIds,
   cycleSurface,
+  equalizeSplits,
+  extractPane,
   findLeaf,
   findLeafBySession,
   firstLeafId,
   moveSurface,
+  neighborPane,
+  paneCount,
   resizeSplit,
+  resizeToward,
   selectSurface,
-  splitPane
+  splitPane,
+  type PaneDirection
 } from './lib/layout'
 import { ControlRequestError, handleControl, type ControlContext } from './lib/control'
 import type { Command } from './lib/palette'
-import { focusedSessionId, makeWorkspace, reorder, sessionIdOfPane } from './lib/workspace'
+import {
+  focusedSessionId,
+  inputTargets,
+  makeWorkspace,
+  nextWorkspaceId,
+  reorder,
+  sessionIdOfPane
+} from './lib/workspace'
 import { TerminalHost } from './terminal-host'
+
+/** 방향 이름 — 팔레트 문구와 단축키 동작 이름이 같은 표를 쓴다. P30 */
+const DIRECTIONS: Array<{ dir: PaneDirection; label: string; toward: string }> = [
+  { dir: 'left', label: '왼쪽', toward: '왼쪽으로' },
+  { dir: 'right', label: '오른쪽', toward: '오른쪽으로' },
+  { dir: 'up', label: '위', toward: '위로' },
+  { dir: 'down', label: '아래', toward: '아래로' }
+]
+
+/**
+ * 할 일이 없으면 키를 셸로 흘려보내는 동작 (P30-2).
+ *
+ * `Alt+화살표`는 셸과 TUI도 쓰는 키다. 옮겨 갈 pane이 없을 때까지 삼키면
+ * 분할하지 않는 사용자는 이유도 모른 채 키 하나를 잃는다 — Windows Terminal도
+ * 이럴 때 키를 터미널에 넘긴다.
+ */
+const PASSTHROUGH_WHEN_IDLE = /^pane\.(focus|resize)\./
+
+/** 키보드로 경계를 옮기는 한 걸음 — 분할의 5% */
+const RESIZE_STEP = 0.05
+
+/** 각 칸이 지켜야 할 최소 픽셀. PaneTree의 끌기와 같은 값. P17-5 */
+const MIN_PANE_PX = 120
 
 /**
  * 앱 단축키 (P6-3 / P17-1 / P22-5).
@@ -109,10 +146,25 @@ export function App(): JSX.Element {
    * 다루기 때문이다. 최신 값을 ref로 건네는 것은 이 파일이 이미 쓰는 방식이다.
    */
   const runActionRef = useRef((_action: string): void => {})
+  /** 이 동작을 지금 단축키로 받아야 하는가 — 아니면 키를 셸로 흘려보낸다. P30-2 */
+  const canRunRef = useRef((_action: string): boolean => true)
   /** 지금 유효한 단축키 표. 설정이 바뀌면 그 자리에서 갈린다 */
   const bindingsRef = useRef(compileBindings(DEFAULT_CONFIG.keybindings))
+  /** 바로 전에 보던 워크스페이스. tmux의 `last-window`. P30-8 */
+  const previousActiveRef = useRef<string | null>(null)
+  const shownActiveRef = useRef<string | null>(null)
 
   activeIdRef.current = activeId
+  /*
+   * 바로 전에 보던 워크스페이스를 기억한다 (P30-8).
+   *
+   * 렌더 안에서 고친다 — 효과(effect)로 미루면 이번 렌더의 팔레트가 낡은 값을 보고
+   * "바로 전 워크스페이스로"를 한 박자 늦게 켠다.
+   */
+  if (shownActiveRef.current !== activeId) {
+    if (shownActiveRef.current !== null) previousActiveRef.current = shownActiveRef.current
+    shownActiveRef.current = activeId
+  }
   workspacesRef.current = workspaces
   sessionsRef.current = sessions
   browsersRef.current = browsers
@@ -129,7 +181,9 @@ export function App(): JSX.Element {
     () =>
       new TerminalHost({
         onInput: (id, data) => {
-          void window.cvmux.write(id, data)
+          for (const target of inputTargets(id, data, workspacesRef.current, sessionsRef.current)) {
+            void window.cvmux.write(target, data)
+          }
         },
         onResize: (id, cols, rows) => {
           void window.cvmux.resize(id, cols, rows)
@@ -137,7 +191,10 @@ export function App(): JSX.Element {
         onRestartRequest: (id) => {
           void window.cvmux.restart(id)
         },
-        isAppShortcut: (event) => actionFor(bindingsRef.current, event) !== null
+        isAppShortcut: (event) => {
+          const action = actionFor(bindingsRef.current, event)
+          return action !== null && canRunRef.current(action)
+        }
       }),
     []
   )
@@ -158,8 +215,8 @@ export function App(): JSX.Element {
    * 하기 때문이다(P20-7). 실패는 예외로 올린다: 사이드바에는 사유를 띄우고,
    * 소켓 클라이언트에게도 같은 사유가 간다.
    */
-  const createWorkspace = useCallback(
-    async (options: { cwd?: string; title?: string } = {}): Promise<string> => {
+  const openWorkspace = useCallback(
+    async (options: { cwd?: string; title?: string } = {}): Promise<{ workspaceId: string; sessionId: string }> => {
       // 새 워크스페이스는 지금 보고 있던 작업 디렉토리를 물려받는다. P11-1
       const result = await window.cvmux.create({ cwd: options.cwd ?? currentSession()?.cwd })
       if (!result.ok || !result.session) {
@@ -172,9 +229,15 @@ export function App(): JSX.Element {
       const workspace = makeWorkspace(result.session.id, options.title ?? null)
       setWorkspaces((prev) => [...prev, workspace])
       setActiveId(workspace.id)
-      return workspace.id
+      return { workspaceId: workspace.id, sessionId: result.session.id }
     },
     [currentSession]
+  )
+
+  const createWorkspace = useCallback(
+    async (options: { cwd?: string; title?: string } = {}): Promise<string> =>
+      (await openWorkspace(options)).workspaceId,
+    [openWorkspace]
   )
 
   /** pane 하나를 둘로 나눈다. P17-1 / P17-2 */
@@ -206,9 +269,12 @@ export function App(): JSX.Element {
         throw new Error('나눌 pane이 사라졌습니다.')
       }
 
+      // 나누면 확대를 푼다 — 새 pane이 보이지 않으면 나눈 보람이 없다. P30-4
       setWorkspaces((prev) =>
         prev.map((w) =>
-          w.id === workspace.id ? { ...w, root: split.root, focusedPaneId: split.newPaneId } : w
+          w.id === workspace.id
+            ? { ...w, root: split.root, focusedPaneId: split.newPaneId, zoomed: false }
+            : w
         )
       )
       return { paneId: split.newPaneId, sessionId }
@@ -535,7 +601,8 @@ export function App(): JSX.Element {
       if (composingRef.current || event.isComposing) return
 
       const action = actionFor(bindingsRef.current, event)
-      if (action === null) return
+      // 할 일이 없는 방향키는 셸의 것이다. P30-2
+      if (action === null || !canRunRef.current(action)) return
 
       event.preventDefault()
       event.stopPropagation()
@@ -637,6 +704,219 @@ export function App(): JSX.Element {
       )
     },
     []
+  )
+
+  // ── 키보드로 pane 다루기 (P30) ───────────────────────────────
+
+  /** 워크스페이스 하나만 고친다. 없는 id면 그대로 */
+  const updateWorkspace = useCallback(
+    (workspaceId: string, change: (workspace: Workspace) => Workspace): void => {
+      setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? change(w) : w)))
+    },
+    []
+  )
+
+  /** 지금 보고 있는 워크스페이스 */
+  const activeWs = useCallback(
+    (): Workspace | undefined => workspacesRef.current.find((w) => w.id === activeIdRef.current),
+    []
+  )
+
+  /** 그 방향의 pane으로 (P30-1). 확대 중이면 옮겨 간 pane이 확대된다 */
+  const focusToward = useCallback(
+    (workspaceId: string, direction: PaneDirection, from?: string): string | null => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) return null
+      const target = neighborPane(workspace.root, from ?? workspace.focusedPaneId, direction)
+      if (target !== null) focusPaneIn(workspaceId, target)
+      return target
+    },
+    [focusPaneIn]
+  )
+
+  /**
+   * 분할 하나가 지켜야 할 최소 비율 (P17-5).
+   *
+   * 끌기와 같은 120px를 그 분할의 실제 크기로 환산한다. 화면에 없으면(숨은
+   * 워크스페이스) 끌기의 기본값을 쓴다.
+   */
+  const minRatioOf = useCallback((splitId: string, direction: 'row' | 'column'): number => {
+    const el = document.querySelector<HTMLElement>(`[data-split-id="${CSS.escape(splitId)}"]`)
+    const size = el ? (direction === 'row' ? el.clientWidth : el.clientHeight) : 0
+    return size > 0 ? Math.min(0.4, MIN_PANE_PX / size) : 0.08
+  }, [])
+
+  /** 경계를 화살표 쪽으로 민다 (P30-3). 옮길 경계가 없으면 false */
+  const nudgeBorder = useCallback(
+    (workspaceId: string, direction: PaneDirection, step = RESIZE_STEP, paneId?: string): boolean => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) return false
+      const next = resizeToward(workspace.root, paneId ?? workspace.focusedPaneId, direction, step, minRatioOf)
+      if (next === workspace.root) return false
+      updateWorkspace(workspaceId, (w) => ({ ...w, root: next }))
+      return true
+    },
+    [minRatioOf, updateWorkspace]
+  )
+
+  /** 확대 켜고 끄기 (P30-4). `state`가 없으면 뒤집는다 */
+  const setZoom = useCallback(
+    (workspaceId: string, state?: boolean): boolean => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) return false
+      const zoomed = state ?? !workspace.zoomed
+      updateWorkspace(workspaceId, (w) => ({ ...w, zoomed }))
+      return zoomed
+    },
+    [updateWorkspace]
+  )
+
+  /** 동시 입력 켜고 끄기 (P30-7) */
+  const setSync = useCallback(
+    (workspaceId: string, state?: boolean): boolean => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) return false
+      const syncInput = state ?? !workspace.syncInput
+      updateWorkspace(workspaceId, (w) => ({ ...w, syncInput }))
+      return syncInput
+    },
+    [updateWorkspace]
+  )
+
+  /** 모든 분할을 고르게 (P30-5) */
+  const equalize = useCallback(
+    (workspaceId: string): void => {
+      updateWorkspace(workspaceId, (w) => ({ ...w, root: equalizeSplits(w.root) }))
+    },
+    [updateWorkspace]
+  )
+
+  /**
+   * pane 하나를 새 워크스페이스로 떼어 낸다 (P30-6).
+   *
+   * 세션은 죽지 않고 자리만 옮긴다. 떼어 낸 pane과 옛 이웃 사이에 켜 둔 ⇄는
+   * 끈다 — ⇄는 분할선 위에서만 보이는데, 분할선이 사라진 뒤에도 몰래 넘기고
+   * 있으면 안 된다(P29-2).
+   *
+   * @returns 새 워크스페이스 id. 마지막 pane이라 떼어 낼 것이 없으면 null
+   */
+  const breakPane = useCallback((workspaceId: string, paneId?: string): string | null => {
+    const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+    if (!workspace) return null
+    const taken = extractPane(workspace.root, paneId ?? workspace.focusedPaneId)
+    if (!taken || taken.rest === null) return null
+    const rest = taken.rest
+
+    const moved = new Set(taken.leaf.surfaces)
+    for (const session of sessionsRef.current) {
+      if (session.relayTo === null) continue
+      const crosses = moved.has(session.id) !== moved.has(session.relayTo)
+      if (crosses) void window.cvmux.setRelay(session.id, session.relayTo, 'off')
+    }
+
+    const fresh: Workspace = {
+      id: nextWorkspaceId(),
+      title: null,
+      root: taken.leaf,
+      focusedPaneId: taken.leaf.id
+    }
+    setWorkspaces((prev) => {
+      const at = prev.findIndex((w) => w.id === workspaceId)
+      const next = prev.map((w) =>
+        w.id === workspaceId
+          ? {
+              ...w,
+              root: rest,
+              focusedPaneId: findLeaf(rest, w.focusedPaneId) ? w.focusedPaneId : firstLeafId(rest)
+            }
+          : w
+      )
+      next.splice(at + 1, 0, fresh)
+      return next
+    })
+    setActiveId(fresh.id)
+    return fresh.id
+  }, [])
+
+  // ── 작업마다 worktree 하나 (P31) ─────────────────────────────
+
+  /**
+   * 새 작업 트리를 만들고 그 자리에 워크스페이스를 연다 (P31-1).
+   *
+   * 이름은 브랜치 이름이다 — Orca가 작업 이름으로 브랜치를 짓는 것과 같은 자리다.
+   */
+  const createWorktreeWorkspace = useCallback(
+    async (branch: string, options: { cwd?: string; base?: string } = {}): Promise<string> => {
+      const from = options.cwd ?? currentSession()?.cwd
+      if (!from) {
+        const message = '어느 저장소에서 만들지 알 수 없습니다 — 저장소 안의 세션에서 불러 주세요.'
+        setError(message)
+        throw new Error(message)
+      }
+      const result = await window.cvmux.worktreeCreate(from, branch, options.base)
+      if (!result.ok || !result.path) {
+        const message = result.message ?? '작업 트리를 만들지 못했습니다.'
+        setError(message)
+        throw new Error(message)
+      }
+      return createWorkspace({ cwd: result.path, title: result.branch ?? branch })
+    },
+    [createWorkspace, currentSession]
+  )
+
+  /**
+   * 작업 트리를 지우고 그 워크스페이스를 닫는다 (P31-3).
+   *
+   * 지울 수 있는지·사람이 동의했는지는 main이 본다. 세션은 main이 닫고, 그러면
+   * 늘 그렇듯 onClosed가 pane을 걷어낸다. 브라우저 탭은 세션이 아니라 여기서 닫는다.
+   */
+  const removeWorktreeWorkspace = useCallback(
+    async (workspaceId: string, confirm: boolean): Promise<{ removed: boolean; message: string | null }> => {
+      const workspace = workspacesRef.current.find((w) => w.id === workspaceId)
+      if (!workspace) throw new Error('워크스페이스를 찾을 수 없습니다.')
+      // 작업 트리인지는 main이 git에 직접 묻는다 — 사이드바의 git 정보는 조사가 늦거나
+      // 실패하면 비어 있을 수 있어 판정의 근거로 쓰지 않는다
+      const focused = focusedSessionId(workspace)
+      const meta = sessionsRef.current.find((s) => s.id === focused)
+      if (!meta) throw new ControlRequestError('그 워크스페이스에 터미널이 없습니다', 'invalid_state')
+
+      const surfaces = collectAllSurfaces(workspace.root)
+      const terminals = surfaces.filter((id) => sessionsRef.current.some((s) => s.id === id))
+      const result = await window.cvmux.worktreeRemove(meta.cwd, terminals, confirm)
+      if (!result.ok) {
+        // 사람이 취소했으면 사유가 없다 — 아무것도 띄우지 않는다
+        if (result.message) setError(result.message)
+        return { removed: false, message: result.message ?? null }
+      }
+      for (const id of surfaces) if (browsersRef.current.has(id)) closeSurface(id)
+      if (result.message) setError(result.message)
+      return { removed: true, message: result.message ?? null }
+    },
+    [closeSurface]
+  )
+
+  // ── 사용자 명령 (P33) ────────────────────────────────────────
+
+  /** 그 세션의 셸에 명령줄을 쳐 준다 */
+  const typeInto = useCallback((sessionId: string, command: string): void => {
+    void window.cvmux.write(sessionId, `${command}\r`)
+  }, [])
+
+  const runCustomCommand = useCallback(
+    async (command: string, target: 'current' | 'tab' | 'workspace'): Promise<void> => {
+      const workspace = activeWs()
+      if (target === 'workspace' || !workspace) {
+        typeInto((await openWorkspace()).sessionId, command)
+        return
+      }
+      if (target === 'tab') {
+        typeInto(await openSurfaceIn(workspace.id, workspace.focusedPaneId, 'terminal'), command)
+        return
+      }
+      const sessionId = focusedSessionId(workspace)
+      if (sessionId !== null && sessionsRef.current.some((s) => s.id === sessionId)) typeInto(sessionId, command)
+    },
+    [activeWs, openWorkspace, openSurfaceIn, typeInto]
   )
 
   // ── 알림함 (P21) ─────────────────────────────────────────────
@@ -796,7 +1076,9 @@ export function App(): JSX.Element {
       }
       setWorkspaces((prev) =>
         prev.map((w) =>
-          w.id === workspace.id ? { ...w, root: split.root, focusedPaneId: split.newPaneId } : w
+          w.id === workspace.id
+            ? { ...w, root: split.root, focusedPaneId: split.newPaneId, zoomed: false }
+            : w
         )
       )
       return meta.id
@@ -845,6 +1127,13 @@ export function App(): JSX.Element {
    */
   const commands = useMemo((): Command[] => {
     const unread = notifications.filter((n) => !n.read).length
+    const focusedMeta = focusedId !== null ? sessionMap.get(focusedId) : undefined
+    const zoomed = activeWorkspace?.zoomed === true
+    const panes = activeWorkspace ? paneCount(activeWorkspace.root) : 0
+    const visibleTerminals = activeWorkspace
+      ? collectSessionIds(activeWorkspace.root).filter((id) => sessionMap.has(id)).length
+      : 0
+    const previous = previousActiveRef.current
     const list: Command[] = [
       {
         id: 'workspace.new',
@@ -885,6 +1174,119 @@ export function App(): JSX.Element {
         hint: hint('pane.close'),
         section: 'pane',
         run: closeFocusedPane
+      },
+      // ── 키보드로 pane 다루기 (P30) ──
+      {
+        id: 'pane.zoom',
+        title: zoomed ? '확대 풀기' : '이 pane 확대',
+        keywords: 'zoom maximize fullscreen pane toggle 확대 최대화',
+        hint: hint('pane.zoom'),
+        section: 'pane',
+        enabled: zoomed || panes > 1,
+        run: () => {
+          if (activeIdRef.current !== null) setZoom(activeIdRef.current)
+        }
+      },
+      ...DIRECTIONS.map(
+        ({ dir, label }): Command => ({
+          id: `pane.focus.${dir}`,
+          title: `${label} pane으로 이동`,
+          keywords: `focus select move pane ${dir} navigate`,
+          hint: hint(`pane.focus.${dir}`),
+          section: 'pane',
+          enabled:
+            activeWorkspace !== null &&
+            neighborPane(activeWorkspace.root, activeWorkspace.focusedPaneId, dir) !== null,
+          run: () => {
+            if (activeIdRef.current !== null) focusToward(activeIdRef.current, dir)
+          }
+        })
+      ),
+      ...DIRECTIONS.map(
+        ({ dir, toward }): Command => ({
+          id: `pane.resize.${dir}`,
+          title: `경계를 ${toward} 밀기`,
+          keywords: `resize pane border ${dir} grow shrink 크기`,
+          hint: hint(`pane.resize.${dir}`),
+          section: 'pane',
+          // 확대 중에는 경계가 보이지 않는다 — 보이지 않는 것을 옮기지 않는다
+          enabled:
+            activeWorkspace !== null &&
+            !zoomed &&
+            resizeToward(activeWorkspace.root, activeWorkspace.focusedPaneId, dir) !== activeWorkspace.root,
+          run: () => {
+            if (activeIdRef.current !== null) nudgeBorder(activeIdRef.current, dir)
+          }
+        })
+      ),
+      {
+        id: 'pane.equalize',
+        title: 'pane 크기 고르게',
+        keywords: 'equalize even balance layout tile pane 균등',
+        hint: hint('pane.equalize'),
+        section: 'pane',
+        enabled: panes > 1,
+        run: () => {
+          if (activeIdRef.current !== null) equalize(activeIdRef.current)
+        }
+      },
+      {
+        id: 'pane.break',
+        title: '이 pane을 새 워크스페이스로',
+        keywords: 'break pane detach move new workspace 떼어내기',
+        hint: hint('pane.break'),
+        section: 'pane',
+        enabled: panes > 1,
+        run: () => {
+          if (activeIdRef.current !== null) breakPane(activeIdRef.current)
+        }
+      },
+      {
+        id: 'pane.sync',
+        title: activeWorkspace?.syncInput ? '동시 입력 끄기' : '보이는 pane 모두에 동시 입력',
+        keywords: 'sync synchronize broadcast input panes 동시 입력',
+        hint: hint('pane.sync'),
+        section: 'pane',
+        enabled: activeWorkspace?.syncInput === true || visibleTerminals > 1,
+        run: () => {
+          if (activeIdRef.current !== null) setSync(activeIdRef.current)
+        }
+      },
+      {
+        id: 'workspace.last',
+        title: '바로 전 워크스페이스로',
+        keywords: 'last previous workspace toggle back 이전',
+        hint: hint('workspace.last'),
+        section: '이동',
+        enabled: previous !== null && previous !== activeId && workspaces.some((w) => w.id === previous),
+        run: () => {
+          const target = previousActiveRef.current
+          if (target !== null && workspacesRef.current.some((w) => w.id === target)) setActiveId(target)
+        }
+      },
+      // ── 작업마다 worktree 하나 (P31) ──
+      {
+        id: 'worktree.new',
+        title: '새 worktree에서 작업…',
+        keywords: 'worktree new branch git task 작업 트리 브랜치',
+        section: 'git',
+        enabled: focusedMeta?.git != null,
+        input: { placeholder: '브랜치 이름 (예: feat/login) — 이미 있으면 그 브랜치를 꺼냅니다' },
+        run: (branch) => {
+          if (branch) void createWorktreeWorkspace(branch).catch(() => undefined)
+        }
+      },
+      {
+        id: 'worktree.remove',
+        title: '이 worktree 정리 (세션을 닫고 폴더를 지운다)',
+        keywords: 'worktree remove delete clean 작업 트리 지우기',
+        section: 'git',
+        enabled: focusedMeta?.git?.worktree === true,
+        run: () => {
+          if (activeIdRef.current !== null) {
+            void removeWorktreeWorkspace(activeIdRef.current, true).catch(() => undefined)
+          }
+        }
       },
       {
         id: 'session.restart',
@@ -1025,6 +1427,27 @@ export function App(): JSX.Element {
       }
     ]
 
+    /*
+     * 설정에 적어 둔 내 명령 (P33).
+     *
+     * 맨 앞에 둔다 — 사람이 직접 적어 둔 것은 자주 쓰려고 적은 것이고, 뒤에 두면
+     * 빈 팔레트의 상한(40개)에 밀려 이름을 치기 전에는 보이지 않는다.
+     */
+    list.unshift(
+      ...config.commands.map(
+        (custom, index): Command => ({
+          id: `command.${index}`,
+          title: custom.name,
+          keywords: `${custom.command} custom user command run`,
+          hint: custom.command.length > 32 ? `${custom.command.slice(0, 31)}…` : custom.command,
+          section: '내 명령',
+          // 지금 pane에서 돌리려면 거기 셸이 있어야 한다(브라우저 탭이 아니어야 한다)
+          enabled: custom.target !== 'current' || focusedMeta !== undefined,
+          run: () => void runCustomCommand(custom.command, custom.target).catch(() => undefined)
+        })
+      )
+    )
+
     // 열려 있는 워크스페이스로 바로 가기
     workspaces.forEach((workspace, index) => {
       const meta = sessionMap.get(focusedSessionId(workspace) ?? '')
@@ -1044,8 +1467,13 @@ export function App(): JSX.Element {
   }, [
     activeId,
     activeWorkspace,
+    breakPane,
     closeFocusedPane,
+    config.commands,
     createWorkspace,
+    createWorktreeWorkspace,
+    equalize,
+    focusToward,
     focusedId,
     hint,
     jumpToUnread,
@@ -1054,7 +1482,12 @@ export function App(): JSX.Element {
     openBrowser,
     openFind,
     openSurface,
+    removeWorktreeWorkspace,
+    nudgeBorder,
+    runCustomCommand,
     sessionMap,
+    setSync,
+    setZoom,
     rightSidebar.open,
     sidebarCollapsed,
     update,
@@ -1092,6 +1525,11 @@ export function App(): JSX.Element {
 
     const command = commands.find((c) => c.id === action)
     if (command && command.enabled !== false) command.run()
+  }
+
+  canRunRef.current = (action: string): boolean => {
+    if (!PASSTHROUGH_WHEN_IDLE.test(action)) return true
+    return commands.some((c) => c.id === action && c.enabled !== false)
   }
 
   /*
@@ -1139,7 +1577,17 @@ export function App(): JSX.Element {
           openFind(scope)
           if (query !== undefined) setFind((prev) => ({ ...prev, query }))
         }
-      }
+      },
+      // P30
+      focusToward,
+      resizePane: (workspaceId, direction, step, paneId) => nudgeBorder(workspaceId, direction, step, paneId),
+      setZoom,
+      equalize,
+      breakPane,
+      setSync,
+      // P31
+      createWorktree: (branch, options) => createWorktreeWorkspace(branch, options),
+      removeWorktree: removeWorktreeWorkspace
     }
 
     return window.cvmux.onControlRequest((ask) => {
@@ -1157,17 +1605,25 @@ export function App(): JSX.Element {
     })
   }, [
     attachWorkspace,
+    breakPane,
     closeFind,
     closeSurface,
     closeWorkspace,
     createWorkspace,
+    createWorktreeWorkspace,
     detachWorkspace,
     dropSurface,
+    equalize,
     focusPaneIn,
+    focusToward,
     openBrowser,
     openSurfaceIn,
     openFind,
+    removeWorktreeWorkspace,
     renameWorkspace,
+    nudgeBorder,
+    setSync,
+    setZoom,
     splitPaneIn
   ])
 
@@ -1308,6 +1764,12 @@ export function App(): JSX.Element {
                     host={host}
                     focusedPaneId={workspace.focusedPaneId}
                     visible={workspace.id === activeId}
+                    zoomed={
+                      workspace.zoomed === true &&
+                      workspace.root.kind === 'split' &&
+                      findLeaf(workspace.root, workspace.focusedPaneId) !== null
+                    }
+                    syncInput={workspace.syncInput === true}
                     onFocusPane={handleFocusPane}
                     onResize={handleResize}
                     onSelectSurface={handleSelectSurface}
