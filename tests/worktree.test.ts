@@ -7,7 +7,7 @@
  * 실행: npm test
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -46,7 +46,8 @@ async function main(): Promise<void> {
   check('P31-2 bare 저장소', mainRootOf('C:/src/app.git') === join('C:\\src', 'app'))
 
   // ── 진짜 저장소로
-  const base = mkdtempSync(join(tmpdir(), 'cvmux-wt-'))
+  // CI의 임시 폴더는 8.3 짧은 이름(RUNNER~1)으로 오지만 git은 긴 이름을 돌려준다 — 풀어 둔다
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cvmux-wt-')))
   const repo = join(base, 'app')
   try {
     execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true })
