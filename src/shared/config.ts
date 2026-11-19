@@ -418,7 +418,15 @@ function oneOf(
  * 설정 파일에 "이 줄이 왜 여기 있는지"를 적을 수 있어야 한다. cmux의
  * `cmux.json`도 JSONC다. 문자열 안의 `//`는 주석이 아니므로 따옴표를 따라간다.
  */
-export function parseJsonc(text: string): unknown {
+export function parseJsonc(raw: string): unknown {
+  /*
+   * 맨 앞의 BOM은 버린다 (P22-1).
+   *
+   * Windows PowerShell 5.1의 `Set-Content -Encoding utf8`·`Out-File`과 몇몇 편집기는
+   * UTF-8 파일 앞에 BOM을 붙인다. JSON.parse는 그것을 글자로 읽고 파일 전체를
+   * 거부해서, 설정이 통째로 무시된다.
+   */
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
   let out = ''
   let inString = false
   let escaped = false

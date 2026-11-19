@@ -443,7 +443,7 @@ cmux는 `~/.config/cmux/cmux.json`으로 테마·폰트·사이드바·단축키
 
 | ID | 엣지 케이스 | cmux 동작 | cvmux 정책 | 구현 위치 |
 |----|-------------|-----------|-----------|----------|
-| P22-1 | 설정 파일 자리 | `~/.config/cmux/cmux.json` | `%APPDATA%\cvmux\cvmux.json`이 정본, `~/.config/cvmux/cvmux.json`도 읽는다. 없으면 **주석이 달린 본보기**를 만든다 — 빈 `{}`를 주면 무엇을 쓸 수 있는지 알 길이 없다. 주석과 마지막 쉼표를 허용한다(JSONC) | `config-store.ts` / `config.ts` |
+| P22-1 | 설정 파일 자리 | `~/.config/cmux/cmux.json` | `%APPDATA%\cvmux\cvmux.json`이 정본, `~/.config/cvmux/cvmux.json`도 읽는다. 없으면 **주석이 달린 본보기**를 만든다 — 빈 `{}`를 주면 무엇을 쓸 수 있는지 알 길이 없다. 주석과 마지막 쉼표를 허용한다(JSONC). 맨 앞의 UTF-8 BOM은 버린다 — Windows PowerShell 5.1의 `Out-File`/`Set-Content -Encoding utf8`과 몇몇 편집기가 붙이는데, 그대로 두면 JSON.parse가 파일 전체를 거부해 설정이 통째로 무시됐다 | `config-store.ts` / `config.ts` |
 | P22-2 | 값 하나가 잘못됨 | — | 그 값만 기본값으로 되돌리고 나머지는 살린다. `fontSize`에 문자열을 넣었다고 폰트 이름까지 돌아가면 무엇을 고쳐야 하는지 알기 어렵다. 범위를 벗어난 수도 같다 | `config.ts` |
 | P22-3 | 오타 난 키 | — | **짚어 준다.** 잘못 적은 키는 아무 일도 일으키지 않고, 아무 일도 일어나지 않는 것이 가장 알아채기 어렵다 — 값을 고쳤는데 화면이 그대로면 사람은 기능이 고장 났다고 읽는다. `cvmux config doctor`가 목록을 준다 | 동일 / `cli/index.ts` |
 | P22-4 | 파일을 고쳐 저장 | 설정 다시 읽기 | 저장하면 바로 반영된다. 편집기가 저장 한 번에 이벤트를 여러 번 내므로 묶어서 한 번만 읽는다. 폰트·색·커서·단축키는 그 자리에서, **셸은 다음 세션부터** — 이미 도는 셸을 갈아 끼울 수는 없다. 다시 읽으면 화면만이 아니라 세션 관리자(셸, 이어서 띄우기, 전달 상한)에도 돌린다 — 0.1.9까지는 `cvmux config reload`를 불러야만 거기 닿았다 | `config-store.ts` / `terminal-host.ts` / `main/index.ts` |

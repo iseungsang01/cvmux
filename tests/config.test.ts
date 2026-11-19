@@ -117,6 +117,10 @@ function main(): void {
       terminal: { shell: string }
     }
     check('문자열 안의 //는 주석이 아니다', withSlash.terminal.shell === 'C://tools//pwsh.exe')
+
+    // PowerShell 5.1의 Out-File -Encoding utf8이 붙이는 BOM — 설정 전체가 무시되던 원인
+    const withBom = parseJsonc('\uFEFF{"terminal":{"fontSize":15}}') as { terminal: { fontSize: number } }
+    check('P22-1 맨 앞의 BOM은 버린다', withBom.terminal.fontSize === 15)
   }
 
   // ── 키 조합
